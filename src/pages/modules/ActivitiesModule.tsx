@@ -1,0 +1,460 @@
+import React, { useState } from 'react';
+import DashboardLayout from '@/components/DashboardLayout';
+import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Activity, Search, Plus, Calendar, MapPin, Users, Clock, CheckCircle2,
+  AlertCircle, Filter, Eye, Edit, Trash2, BarChart3, TrendingUp,
+  Home, ClipboardList, UserCheck, Target, Play, Pause, ChevronRight
+} from 'lucide-react';
+
+type ActivityType = 'all' | 'home_visit' | 'screening_campaign' | 'awareness' | 'training' | 'community_meeting' | 'follow_up';
+type ActivityStatus = 'all' | 'planned' | 'in_progress' | 'completed' | 'cancelled';
+
+interface ActivityItem {
+  id: string;
+  title: string;
+  type: ActivityType;
+  status: ActivityStatus;
+  date: string;
+  time: string;
+  location: string;
+  area: string;
+  responsible: string;
+  participants: number;
+  targetParticipants: number;
+  description: string;
+  outcomes?: string;
+  families?: number;
+  childrenScreened?: number;
+  createdAt: string;
+}
+
+const mockActivities: ActivityItem[] = [
+  {
+    id: '1', title: 'Campagne de dépistage – Abobo Nord', type: 'screening_campaign', status: 'completed',
+    date: '2026-03-08', time: '08:00 - 14:00', location: 'Centre communautaire Abobo Nord', area: 'Abobo',
+    responsible: 'Équipe terrain Alpha', participants: 45, targetParticipants: 50,
+    description: 'Dépistage développemental des enfants de 0-5 ans dans le quartier Anador.',
+    outcomes: '45 enfants dépistés, 8 cas suspects identifiés, 5 orientations effectuées.',
+    families: 38, childrenScreened: 45, createdAt: '2026-02-25'
+  },
+  {
+    id: '2', title: 'Visite à domicile – Famille Traoré', type: 'home_visit', status: 'completed',
+    date: '2026-03-07', time: '10:00 - 11:30', location: 'Domicile famille Traoré', area: 'Abobo',
+    responsible: 'Koné Safiatou', participants: 1, targetParticipants: 1,
+    description: 'Suivi de Seydou (retard de langage) et évaluation de Mariam.',
+    outcomes: 'Recommandation de consultation spécialisée pour Mariam.', families: 1, createdAt: '2026-03-05'
+  },
+  {
+    id: '3', title: 'Sensibilisation – Marché de Yopougon', type: 'awareness', status: 'in_progress',
+    date: '2026-03-10', time: '09:00 - 16:00', location: 'Grand marché de Yopougon', area: 'Yopougon',
+    responsible: 'Équipe terrain Beta', participants: 120, targetParticipants: 200,
+    description: 'Journée de sensibilisation sur le développement de l\'enfant et les signes d\'alerte.',
+    createdAt: '2026-03-01'
+  },
+  {
+    id: '4', title: 'Réunion communautaire – Leaders Cocody', type: 'community_meeting', status: 'planned',
+    date: '2026-03-14', time: '15:00 - 17:00', location: 'Mairie de Cocody', area: 'Cocody',
+    responsible: 'Diallo Ibrahim', participants: 0, targetParticipants: 25,
+    description: 'Présentation du programme aux leaders communautaires et chefs de quartier.',
+    createdAt: '2026-03-06'
+  },
+  {
+    id: '5', title: 'Formation agents relais – Module 2', type: 'training', status: 'planned',
+    date: '2026-03-18', time: '09:00 - 17:00', location: 'Salle de formation NURIA', area: 'Plateau',
+    responsible: 'Dr. Konaté', participants: 0, targetParticipants: 15,
+    description: 'Formation sur l\'utilisation des outils de dépistage ASQ-3 et M-CHAT.',
+    createdAt: '2026-03-08'
+  },
+  {
+    id: '6', title: 'Suivi post-orientation – Quartier Sicogi', type: 'follow_up', status: 'planned',
+    date: '2026-03-12', time: '09:00 - 12:00', location: 'Quartier Sicogi, Yopougon', area: 'Yopougon',
+    responsible: 'Koné Safiatou', participants: 0, targetParticipants: 6,
+    description: 'Suivi des familles orientées le mois dernier pour vérifier la prise en charge.',
+    families: 6, createdAt: '2026-03-09'
+  },
+  {
+    id: '7', title: 'Campagne de dépistage – Adjamé', type: 'screening_campaign', status: 'cancelled',
+    date: '2026-03-03', time: '08:00 - 14:00', location: 'Maternité d\'Adjamé', area: 'Adjamé',
+    responsible: 'Équipe terrain Alpha', participants: 0, targetParticipants: 40,
+    description: 'Reportée en raison de l\'indisponibilité du lieu.',
+    createdAt: '2026-02-20'
+  },
+];
+
+const typeConfig: Record<string, { label: Record<string, string>; icon: React.ElementType; color: string }> = {
+  home_visit: { label: { fr: 'Visite à domicile', en: 'Home visit', pt: 'Visita domiciliar', ar: 'زيارة منزلية' }, icon: Home, color: 'text-blue-500' },
+  screening_campaign: { label: { fr: 'Campagne de dépistage', en: 'Screening campaign', pt: 'Campanha de triagem', ar: 'حملة فحص' }, icon: ClipboardList, color: 'text-emerald-500' },
+  awareness: { label: { fr: 'Sensibilisation', en: 'Awareness', pt: 'Sensibilização', ar: 'توعية' }, icon: Users, color: 'text-orange-500' },
+  training: { label: { fr: 'Formation', en: 'Training', pt: 'Formação', ar: 'تدريب' }, icon: Target, color: 'text-violet-500' },
+  community_meeting: { label: { fr: 'Réunion communautaire', en: 'Community meeting', pt: 'Reunião comunitária', ar: 'اجتماع مجتمعي' }, icon: UserCheck, color: 'text-amber-500' },
+  follow_up: { label: { fr: 'Suivi', en: 'Follow-up', pt: 'Acompanhamento', ar: 'متابعة' }, icon: Activity, color: 'text-teal-500' },
+};
+
+const statusConfig: Record<string, { label: Record<string, string>; style: string; icon: React.ElementType }> = {
+  planned: { label: { fr: 'Planifiée', en: 'Planned', pt: 'Planejada', ar: 'مخططة' }, style: 'bg-blue-100 text-blue-800 border-blue-200', icon: Calendar },
+  in_progress: { label: { fr: 'En cours', en: 'In progress', pt: 'Em andamento', ar: 'جارية' }, style: 'bg-amber-100 text-amber-800 border-amber-200', icon: Play },
+  completed: { label: { fr: 'Terminée', en: 'Completed', pt: 'Concluída', ar: 'مكتملة' }, style: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: CheckCircle2 },
+  cancelled: { label: { fr: 'Annulée', en: 'Cancelled', pt: 'Cancelada', ar: 'ملغاة' }, style: 'bg-red-100 text-red-800 border-red-200', icon: AlertCircle },
+};
+
+const ActivitiesModule: React.FC = () => {
+  const { lang } = useLanguage();
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<ActivityType>('all');
+  const [statusFilter, setStatusFilter] = useState<ActivityStatus>('all');
+  const [activities, setActivities] = useState<ActivityItem[]>(mockActivities);
+  const [selectedActivity, setSelectedActivity] = useState<ActivityItem | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newActivity, setNewActivity] = useState({
+    title: '', type: 'home_visit' as ActivityType, date: '', time: '', location: '', area: '', description: '', targetParticipants: '',
+  });
+
+  const filtered = activities.filter(a => {
+    const matchSearch = a.title.toLowerCase().includes(search.toLowerCase()) ||
+      a.location.toLowerCase().includes(search.toLowerCase()) ||
+      a.area.toLowerCase().includes(search.toLowerCase()) ||
+      a.responsible.toLowerCase().includes(search.toLowerCase());
+    const matchType = typeFilter === 'all' || a.type === typeFilter;
+    const matchStatus = statusFilter === 'all' || a.status === statusFilter;
+    return matchSearch && matchType && matchStatus;
+  });
+
+  const stats = {
+    total: activities.length,
+    planned: activities.filter(a => a.status === 'planned').length,
+    inProgress: activities.filter(a => a.status === 'in_progress').length,
+    completed: activities.filter(a => a.status === 'completed').length,
+    totalParticipants: activities.reduce((s, a) => s + a.participants, 0),
+    totalScreened: activities.reduce((s, a) => s + (a.childrenScreened || 0), 0),
+  };
+
+  const handleCreate = () => {
+    if (!newActivity.title.trim() || !newActivity.date) return;
+    const activity: ActivityItem = {
+      id: Date.now().toString(), title: newActivity.title, type: newActivity.type,
+      status: 'planned', date: newActivity.date, time: newActivity.time,
+      location: newActivity.location, area: newActivity.area,
+      responsible: user ? `${user.firstName} ${user.lastName}` : 'Moi',
+      participants: 0, targetParticipants: parseInt(newActivity.targetParticipants) || 0,
+      description: newActivity.description, createdAt: new Date().toISOString().split('T')[0],
+    };
+    setActivities(prev => [activity, ...prev]);
+    setNewActivity({ title: '', type: 'home_visit', date: '', time: '', location: '', area: '', description: '', targetParticipants: '' });
+    setShowCreate(false);
+  };
+
+  const updateStatus = (id: string, status: ActivityStatus) => {
+    setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    if (selectedActivity?.id === id) setSelectedActivity(prev => prev ? { ...prev, status } : null);
+  };
+
+  const deleteActivity = (id: string) => {
+    setActivities(prev => prev.filter(a => a.id !== id));
+    if (selectedActivity?.id === id) setSelectedActivity(null);
+  };
+
+  const l = {
+    fr: { title: 'Activités terrain', search: 'Rechercher une activité...', newActivity: 'Nouvelle activité', total: 'Total', planned: 'Planifiées', inProgress: 'En cours', completed: 'Terminées', participants: 'Participants', screened: 'Enfants dépistés', all: 'Toutes', details: 'Détails', date: 'Date', time: 'Horaire', location: 'Lieu', area: 'Zone', responsible: 'Responsable', target: 'Objectif', progress: 'Progression', outcomes: 'Résultats', families: 'Familles', type: 'Type', status: 'Statut', description: 'Description', create: 'Créer', cancel: 'Annuler', activityTitle: 'Titre', targetParticipants: 'Participants visés', noResults: 'Aucune activité trouvée', selectActivity: 'Sélectionnez une activité', start: 'Démarrer', complete: 'Terminer', delete: 'Supprimer', actions: 'Actions' },
+    en: { title: 'Field activities', search: 'Search activities...', newActivity: 'New activity', total: 'Total', planned: 'Planned', inProgress: 'In progress', completed: 'Completed', participants: 'Participants', screened: 'Children screened', all: 'All', details: 'Details', date: 'Date', time: 'Time', location: 'Location', area: 'Area', responsible: 'Responsible', target: 'Target', progress: 'Progress', outcomes: 'Outcomes', families: 'Families', type: 'Type', status: 'Status', description: 'Description', create: 'Create', cancel: 'Cancel', activityTitle: 'Title', targetParticipants: 'Target participants', noResults: 'No activities found', selectActivity: 'Select an activity', start: 'Start', complete: 'Complete', delete: 'Delete', actions: 'Actions' },
+    pt: { title: 'Atividades de campo', search: 'Pesquisar atividades...', newActivity: 'Nova atividade', total: 'Total', planned: 'Planejadas', inProgress: 'Em andamento', completed: 'Concluídas', participants: 'Participantes', screened: 'Crianças triadas', all: 'Todas', details: 'Detalhes', date: 'Data', time: 'Horário', location: 'Local', area: 'Zona', responsible: 'Responsável', target: 'Objetivo', progress: 'Progresso', outcomes: 'Resultados', families: 'Famílias', type: 'Tipo', status: 'Status', description: 'Descrição', create: 'Criar', cancel: 'Cancelar', activityTitle: 'Título', targetParticipants: 'Participantes alvo', noResults: 'Nenhuma atividade encontrada', selectActivity: 'Selecione uma atividade', start: 'Iniciar', complete: 'Concluir', delete: 'Excluir', actions: 'Ações' },
+    ar: { title: 'الأنشطة الميدانية', search: 'البحث عن نشاط...', newActivity: 'نشاط جديد', total: 'الإجمالي', planned: 'مخططة', inProgress: 'جارية', completed: 'مكتملة', participants: 'المشاركون', screened: 'الأطفال المفحوصون', all: 'الكل', details: 'التفاصيل', date: 'التاريخ', time: 'الوقت', location: 'المكان', area: 'المنطقة', responsible: 'المسؤول', target: 'الهدف', progress: 'التقدم', outcomes: 'النتائج', families: 'العائلات', type: 'النوع', status: 'الحالة', description: 'الوصف', create: 'إنشاء', cancel: 'إلغاء', activityTitle: 'العنوان', targetParticipants: 'المشاركون المستهدفون', noResults: 'لا توجد أنشطة', selectActivity: 'اختر نشاطًا', start: 'بدء', complete: 'إنهاء', delete: 'حذف', actions: 'إجراءات' },
+  }[lang] || { title: 'Activités', search: 'Rechercher...', newActivity: 'Nouveau', total: 'Total', planned: 'Planifiées', inProgress: 'En cours', completed: 'Terminées', participants: 'Participants', screened: 'Dépistés', all: 'Toutes', details: 'Détails', date: 'Date', time: 'Horaire', location: 'Lieu', area: 'Zone', responsible: 'Responsable', target: 'Objectif', progress: 'Progression', outcomes: 'Résultats', families: 'Familles', type: 'Type', status: 'Statut', description: 'Description', create: 'Créer', cancel: 'Annuler', activityTitle: 'Titre', targetParticipants: 'Visés', noResults: 'Aucune', selectActivity: 'Sélectionner', start: 'Démarrer', complete: 'Terminer', delete: 'Supprimer', actions: 'Actions' };
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{l.title}</h1>
+            <p className="text-muted-foreground text-sm">{stats.total} activités</p>
+          </div>
+          <Dialog open={showCreate} onOpenChange={setShowCreate}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4 mr-2" />{l.newActivity}</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5" />{l.newActivity}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <div>
+                  <Label>{l.activityTitle} *</Label>
+                  <Input value={newActivity.title} onChange={e => setNewActivity(p => ({ ...p, title: e.target.value }))} className="mt-1" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>{l.type}</Label>
+                    <Select value={newActivity.type} onValueChange={v => setNewActivity(p => ({ ...p, type: v as ActivityType }))}>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(typeConfig).map(([key, cfg]) => (
+                          <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>{l.date} *</Label>
+                    <Input type="date" value={newActivity.date} onChange={e => setNewActivity(p => ({ ...p, date: e.target.value }))} className="mt-1" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>{l.time}</Label>
+                    <Input value={newActivity.time} onChange={e => setNewActivity(p => ({ ...p, time: e.target.value }))} placeholder="09:00 - 12:00" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>{l.targetParticipants}</Label>
+                    <Input type="number" value={newActivity.targetParticipants} onChange={e => setNewActivity(p => ({ ...p, targetParticipants: e.target.value }))} className="mt-1" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>{l.location}</Label>
+                    <Input value={newActivity.location} onChange={e => setNewActivity(p => ({ ...p, location: e.target.value }))} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>{l.area}</Label>
+                    <Input value={newActivity.area} onChange={e => setNewActivity(p => ({ ...p, area: e.target.value }))} className="mt-1" />
+                  </div>
+                </div>
+                <div>
+                  <Label>{l.description}</Label>
+                  <Textarea value={newActivity.description} onChange={e => setNewActivity(p => ({ ...p, description: e.target.value }))} className="mt-1" rows={3} />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowCreate(false)}>{l.cancel}</Button>
+                  <Button onClick={handleCreate}>{l.create}</Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {[
+            { label: l.total, value: stats.total, icon: Activity, color: 'text-primary' },
+            { label: l.planned, value: stats.planned, icon: Calendar, color: 'text-blue-500' },
+            { label: l.inProgress, value: stats.inProgress, icon: Play, color: 'text-amber-500' },
+            { label: l.completed, value: stats.completed, icon: CheckCircle2, color: 'text-emerald-500' },
+            { label: l.participants, value: stats.totalParticipants, icon: Users, color: 'text-violet-500' },
+            { label: l.screened, value: stats.totalScreened, icon: ClipboardList, color: 'text-teal-500' },
+          ].map(s => (
+            <Card key={s.label}>
+              <CardContent className="p-3 flex items-center gap-3">
+                <div className={`p-2 rounded-lg bg-muted ${s.color}`}><s.icon className="h-4 w-4" /></div>
+                <div>
+                  <p className="text-xl font-bold text-foreground">{s.value}</p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder={l.search} className="pl-10" />
+          </div>
+          <Select value={typeFilter} onValueChange={v => setTypeFilter(v as ActivityType)}>
+            <SelectTrigger className="w-full sm:w-52"><Filter className="h-4 w-4 mr-2" /><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{l.all}</SelectItem>
+              {Object.entries(typeConfig).map(([key, cfg]) => (
+                <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={v => setStatusFilter(v as ActivityStatus)}>
+            <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{l.all}</SelectItem>
+              {Object.entries(statusConfig).map(([key, cfg]) => (
+                <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Activity list */}
+          <div className="lg:col-span-2 space-y-3">
+            {filtered.length === 0 ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground"><Activity className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{l.noResults}</p></CardContent></Card>
+            ) : filtered.map(activity => {
+              const typeCfg = typeConfig[activity.type];
+              const Icon = typeCfg?.icon || Activity;
+              const progressPercent = activity.targetParticipants > 0 ? Math.round((activity.participants / activity.targetParticipants) * 100) : 0;
+
+              return (
+                <Card
+                  key={activity.id}
+                  className={`cursor-pointer transition-all hover:shadow-md ${selectedActivity?.id === activity.id ? 'ring-2 ring-primary' : ''}`}
+                  onClick={() => setSelectedActivity(activity)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-4">
+                      <div className={`p-2.5 rounded-lg bg-muted flex-shrink-0 ${typeCfg?.color || 'text-muted-foreground'}`}>
+                        <Icon className="h-5 w-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="font-semibold text-foreground">{activity.title}</p>
+                          <Badge className={`text-xs flex-shrink-0 ${statusConfig[activity.status]?.style || ''}`}>
+                            {statusConfig[activity.status]?.label[lang]}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-1 mb-2">{activity.description}</p>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{activity.date}</span>
+                          {activity.time && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{activity.time}</span>}
+                          <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{activity.area}</span>
+                          <span className="flex items-center gap-1"><Users className="h-3 w-3" />{activity.participants}/{activity.targetParticipants}</span>
+                        </div>
+                        {activity.status !== 'cancelled' && activity.targetParticipants > 0 && (
+                          <div className="mt-2">
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all"
+                                style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Detail panel */}
+          <div>
+            {selectedActivity ? (() => {
+              const typeCfg = typeConfig[selectedActivity.type];
+              const Icon = typeCfg?.icon || Activity;
+              const progressPercent = selectedActivity.targetParticipants > 0
+                ? Math.round((selectedActivity.participants / selectedActivity.targetParticipants) * 100) : 0;
+
+              return (
+                <Card className="sticky top-20">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className={`p-2 rounded-lg bg-muted ${typeCfg?.color}`}><Icon className="h-5 w-5" /></div>
+                      <Badge variant="outline" className="text-xs">{typeCfg?.label[lang]}</Badge>
+                    </div>
+                    <CardTitle className="text-lg">{selectedActivity.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <Badge className={`${statusConfig[selectedActivity.status]?.style}`}>
+                      {statusConfig[selectedActivity.status]?.label[lang]}
+                    </Badge>
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex justify-between"><span className="text-muted-foreground">{l.date}</span><span className="font-medium text-foreground">{selectedActivity.date}</span></div>
+                      {selectedActivity.time && <div className="flex justify-between"><span className="text-muted-foreground">{l.time}</span><span className="font-medium text-foreground">{selectedActivity.time}</span></div>}
+                      <div className="flex justify-between"><span className="text-muted-foreground">{l.location}</span><span className="font-medium text-foreground text-right max-w-[60%]">{selectedActivity.location}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">{l.area}</span><span className="font-medium text-foreground">{selectedActivity.area}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">{l.responsible}</span><span className="font-medium text-foreground">{selectedActivity.responsible}</span></div>
+                    </div>
+
+                    {/* Progress */}
+                    {selectedActivity.targetParticipants > 0 && (
+                      <div className="bg-muted/50 rounded-lg p-3">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="text-muted-foreground">{l.progress}</span>
+                          <span className="font-bold text-foreground">{progressPercent}%</span>
+                        </div>
+                        <div className="h-2 bg-background rounded-full overflow-hidden">
+                          <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{selectedActivity.participants} / {selectedActivity.targetParticipants} {l.participants.toLowerCase()}</p>
+                      </div>
+                    )}
+
+                    {/* Key metrics */}
+                    {(selectedActivity.families || selectedActivity.childrenScreened) && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {selectedActivity.families != null && (
+                          <div className="bg-muted/50 rounded-lg p-3 text-center">
+                            <p className="text-lg font-bold text-foreground">{selectedActivity.families}</p>
+                            <p className="text-xs text-muted-foreground">{l.families}</p>
+                          </div>
+                        )}
+                        {selectedActivity.childrenScreened != null && (
+                          <div className="bg-muted/50 rounded-lg p-3 text-center">
+                            <p className="text-lg font-bold text-foreground">{selectedActivity.childrenScreened}</p>
+                            <p className="text-xs text-muted-foreground">{l.screened}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase mb-1">{l.description}</p>
+                      <p className="text-sm text-foreground">{selectedActivity.description}</p>
+                    </div>
+
+                    {selectedActivity.outcomes && (
+                      <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+                        <p className="text-xs font-medium text-emerald-800 dark:text-emerald-300 uppercase mb-1">{l.outcomes}</p>
+                        <p className="text-sm text-emerald-700 dark:text-emerald-400">{selectedActivity.outcomes}</p>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="border-t border-border pt-4 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase">{l.actions}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedActivity.status === 'planned' && (
+                          <Button size="sm" onClick={() => updateStatus(selectedActivity.id, 'in_progress')}>
+                            <Play className="h-3.5 w-3.5 mr-1" />{l.start}
+                          </Button>
+                        )}
+                        {selectedActivity.status === 'in_progress' && (
+                          <Button size="sm" onClick={() => updateStatus(selectedActivity.id, 'completed')}>
+                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{l.complete}
+                          </Button>
+                        )}
+                        <Button size="sm" variant="destructive" onClick={() => deleteActivity(selectedActivity.id)}>
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />{l.delete}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })() : (
+              <Card>
+                <CardContent className="p-12 text-center text-muted-foreground">
+                  <Activity className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                  <p>{l.selectActivity}</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default ActivitiesModule;
