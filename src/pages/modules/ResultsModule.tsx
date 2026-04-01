@@ -1,402 +1,330 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 import {
-  BarChart3, TrendingUp, TrendingDown, Calendar, Baby, FileText,
-  Download, Eye, ChevronRight, CheckCircle2, AlertTriangle, Clock,
-  Activity, Brain, MessageCircle, Hand, Footprints, Users
+  BarChart3, Calendar, Download, Eye, ChevronRight, CheckCircle2, 
+  AlertTriangle, Clock, Activity, Brain, MessageCircle, Hand, Footprints, 
+  Users, Loader2, MapPin, User, Phone, Baby, FileText // <-- FileText ajouté ici !
 } from 'lucide-react';
 
-interface ChildResult {
+// Type correspondant exactement à la table 'screenings' de Supabase
+interface ScreeningData {
   id: string;
-  childName: string;
-  childAge: string;
-  avatar: string;
-  evaluations: Evaluation[];
-}
-
-interface Evaluation {
-  id: string;
-  name: string;
-  date: string;
-  status: 'normal' | 'warning' | 'alert';
-  globalScore: number;
-  maxScore: number;
-  riskLevel: string;
-  domains: Domain[];
-  recommendations: string[];
-}
-
-interface Domain {
-  name: string;
+  child_name: string;
+  dob: string;
+  gender: string;
+  location: string;
+  parent_name: string;
+  parent_contact: string;
   score: number;
-  maxScore: number;
-  icon: React.ElementType;
-  status: 'normal' | 'warning' | 'alert';
+  risk_level: string;
+  created_at: string;
+  responses: Record<string, boolean>; 
 }
 
-const mockChildren: ChildResult[] = [
-  {
-    id: '1',
-    childName: 'Aminata Diallo',
-    childAge: '3 ans 4 mois',
-    avatar: 'AD',
-    evaluations: [
-      {
-        id: 'e1',
-        name: 'ASQ-3 (36 mois)',
-        date: '2026-03-05',
-        status: 'warning',
-        globalScore: 72,
-        maxScore: 100,
-        riskLevel: 'Surveillance',
-        domains: [
-          { name: 'Communication', score: 45, maxScore: 60, icon: MessageCircle, status: 'normal' },
-          { name: 'Motricité globale', score: 30, maxScore: 60, icon: Footprints, status: 'warning' },
-          { name: 'Motricité fine', score: 50, maxScore: 60, icon: Hand, status: 'normal' },
-          { name: 'Résolution problèmes', score: 25, maxScore: 60, icon: Brain, status: 'alert' },
-          { name: 'Aptitudes individuelles', score: 40, maxScore: 60, icon: Users, status: 'normal' },
-        ],
-        recommendations: [
-          'Consultation spécialisée recommandée pour la résolution de problèmes',
-          'Exercices de motricité globale à intégrer au quotidien',
-          'Réévaluation dans 3 mois',
-        ],
-      },
-      {
-        id: 'e2',
-        name: 'M-CHAT-R/F',
-        date: '2026-02-15',
-        status: 'normal',
-        globalScore: 88,
-        maxScore: 100,
-        riskLevel: 'Faible',
-        domains: [
-          { name: 'Attention conjointe', score: 18, maxScore: 20, icon: Eye, status: 'normal' },
-          { name: 'Interaction sociale', score: 16, maxScore: 20, icon: Users, status: 'normal' },
-          { name: 'Communication', score: 17, maxScore: 20, icon: MessageCircle, status: 'normal' },
-          { name: 'Comportements', score: 14, maxScore: 20, icon: Activity, status: 'normal' },
-        ],
-        recommendations: [
-          'Développement dans les normes attendues',
-          'Continuer la stimulation quotidienne',
-        ],
-      },
-    ],
-  },
-  {
-    id: '2',
-    childName: 'Moussa Konaté',
-    childAge: '2 ans 1 mois',
-    avatar: 'MK',
-    evaluations: [
-      {
-        id: 'e3',
-        name: 'ASQ-3 (24 mois)',
-        date: '2026-03-01',
-        status: 'alert',
-        globalScore: 45,
-        maxScore: 100,
-        riskLevel: 'Élevé',
-        domains: [
-          { name: 'Communication', score: 15, maxScore: 60, icon: MessageCircle, status: 'alert' },
-          { name: 'Motricité globale', score: 40, maxScore: 60, icon: Footprints, status: 'normal' },
-          { name: 'Motricité fine', score: 20, maxScore: 60, icon: Hand, status: 'warning' },
-          { name: 'Résolution problèmes', score: 18, maxScore: 60, icon: Brain, status: 'alert' },
-          { name: 'Aptitudes individuelles', score: 22, maxScore: 60, icon: Users, status: 'warning' },
-        ],
-        recommendations: [
-          'Orientation urgente vers un spécialiste du neurodéveloppement',
-          'Bilan orthophonique recommandé',
-          'Mise en place d\'un programme de stimulation précoce',
-          'Suivi rapproché toutes les 6 semaines',
-        ],
-      },
-    ],
-  },
-  {
-    id: '3',
-    childName: 'Fatou Sow',
-    childAge: '4 ans 8 mois',
-    avatar: 'FS',
-    evaluations: [
-      {
-        id: 'e4',
-        name: 'SNAP-IV (TDAH)',
-        date: '2026-02-28',
-        status: 'warning',
-        globalScore: 62,
-        maxScore: 100,
-        riskLevel: 'Modéré',
-        domains: [
-          { name: 'Inattention', score: 14, maxScore: 27, icon: Eye, status: 'warning' },
-          { name: 'Hyperactivité', score: 16, maxScore: 27, icon: Activity, status: 'warning' },
-          { name: 'Impulsivité', score: 8, maxScore: 18, icon: Brain, status: 'normal' },
-        ],
-        recommendations: [
-          'Observation en milieu scolaire recommandée',
-          'Techniques de gestion de l\'attention à mettre en place',
-          'Réévaluation dans 2 mois',
-        ],
-      },
-      {
-        id: 'e5',
-        name: 'ASQ-3 (54 mois)',
-        date: '2026-01-10',
-        status: 'normal',
-        globalScore: 91,
-        maxScore: 100,
-        riskLevel: 'Faible',
-        domains: [
-          { name: 'Communication', score: 55, maxScore: 60, icon: MessageCircle, status: 'normal' },
-          { name: 'Motricité globale', score: 52, maxScore: 60, icon: Footprints, status: 'normal' },
-          { name: 'Motricité fine', score: 48, maxScore: 60, icon: Hand, status: 'normal' },
-          { name: 'Résolution problèmes', score: 50, maxScore: 60, icon: Brain, status: 'normal' },
-          { name: 'Aptitudes individuelles', score: 54, maxScore: 60, icon: Users, status: 'normal' },
-        ],
-        recommendations: ['Développement harmonieux, continuer les activités d\'éveil'],
-      },
-    ],
-  },
-];
-
-const statusConfig = {
-  normal: { label: 'Normal', color: 'text-secondary', bg: 'bg-secondary/10', icon: CheckCircle2 },
-  warning: { label: 'Surveillance', color: 'text-accent', bg: 'bg-accent/10', icon: Clock },
-  alert: { label: 'Alerte', color: 'text-destructive', bg: 'bg-destructive/10', icon: AlertTriangle },
+const statusConfig: Record<string, any> = {
+  normal: { label: 'Risque Faible', color: 'text-emerald-600', bg: 'bg-emerald-100', icon: CheckCircle2 },
+  warning: { label: 'Risque Moyen', color: 'text-amber-600', bg: 'bg-amber-100', icon: AlertTriangle },
+  alert: { label: 'Risque Élevé', color: 'text-red-600', bg: 'bg-red-100', icon: AlertTriangle },
 };
 
 const ResultsModule: React.FC = () => {
   const { t } = useLanguage();
-  const [selectedChild, setSelectedChild] = useState<string | null>(null);
-  const [selectedEval, setSelectedEval] = useState<string | null>(null);
+  const { toast } = useToast();
+  
+  // --- États pour les vraies données ---
+  const [screenings, setScreenings] = useState<ScreeningData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // --- États pour la navigation ---
+  const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
 
-  const child = mockChildren.find(c => c.id === selectedChild);
-  const evaluation = child?.evaluations.find(e => e.id === selectedEval);
+  // 1. Récupération des données depuis Supabase
+  useEffect(() => {
+    const fetchScreenings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('screenings')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-  // Stats
-  const totalEvals = mockChildren.reduce((a, c) => a + c.evaluations.length, 0);
-  const alertCount = mockChildren.reduce((a, c) => a + c.evaluations.filter(e => e.status === 'alert').length, 0);
-  const warningCount = mockChildren.reduce((a, c) => a + c.evaluations.filter(e => e.status === 'warning').length, 0);
+        if (error) throw error;
+        setScreenings(data || []);
+      } catch (error: any) {
+        toast({
+          title: "Erreur",
+          description: "Impossible de récupérer les résultats : " + error.message,
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchScreenings();
+  }, [toast]);
+
+  // Utilitaires de conversion
+  const calculateAge = (dobString: string) => {
+    if (!dobString) return 'Âge inconnu';
+    const dob = new Date(dobString);
+    const today = new Date();
+    let ageMonths = (today.getFullYear() - dob.getFullYear()) * 12 + (today.getMonth() - dob.getMonth());
+    if (ageMonths < 12) return `${ageMonths} mois`;
+    const years = Math.floor(ageMonths / 12);
+    const months = ageMonths % 12;
+    return months > 0 ? `${years} ans ${months} mois` : `${years} ans`;
+  };
+
+  const getStatusKey = (riskLevel: string) => {
+    if (riskLevel?.includes('Élevé')) return 'alert';
+    if (riskLevel?.includes('Moyen')) return 'warning';
+    return 'normal';
+  };
+
+  // --- STATISTIQUES GLOBALES ---
+  const totalEvals = screenings.length;
+  const alertCount = screenings.filter(s => getStatusKey(s.risk_level) === 'alert').length;
+  const warningCount = screenings.filter(s => getStatusKey(s.risk_level) === 'warning').length;
   const normalCount = totalEvals - alertCount - warningCount;
 
-  // Detail view for a single evaluation
-  if (evaluation && child) {
-    const sc = statusConfig[evaluation.status];
+  // L'enfant actuellement sélectionné
+  const selectedEval = screenings.find(s => s.id === selectedChildId);
+
+  // ---------------------------------------------------------------------------
+  // VUE 2 : DÉTAIL D'UNE ÉVALUATION
+  // ---------------------------------------------------------------------------
+  if (selectedEval) {
+    const statusKey = getStatusKey(selectedEval.risk_level);
+    const sc = statusConfig[statusKey];
     const StatusIcon = sc.icon;
+    const scorePercentage = (selectedEval.score / 20) * 100;
+
     return (
       <DashboardLayout>
         <div className="max-w-4xl mx-auto">
-          <Button variant="ghost" className="mb-4" onClick={() => setSelectedEval(null)}>
-            ← Retour aux évaluations
+          <Button variant="ghost" className="mb-4 hover:bg-slate-200" onClick={() => setSelectedChildId(null)}>
+            ← Retour à la liste des dépistages
           </Button>
 
-          {/* Header */}
-          <div className="flex items-center gap-4 mb-6">
-            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
-              {child.avatar}
+          {/* Header du dossier */}
+          <div className="flex items-center gap-4 mb-6 bg-white p-6 rounded-2xl shadow-sm border">
+            <div className={`h-16 w-16 rounded-full flex items-center justify-center font-black text-2xl ${sc.bg} ${sc.color}`}>
+              {selectedEval.child_name.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold">{evaluation.name}</h1>
-              <p className="text-muted-foreground">{child.childName} · {child.childAge} · {new Date(evaluation.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              <h1 className="text-2xl font-bold text-slate-800">{selectedEval.child_name}</h1>
+              <div className="flex gap-4 text-sm text-slate-500 mt-2 font-medium">
+                <span className="flex items-center gap-1"><Baby className="h-4 w-4"/> {calculateAge(selectedEval.dob)} ({selectedEval.gender})</span>
+                <span className="flex items-center gap-1"><MapPin className="h-4 w-4"/> {selectedEval.location}</span>
+                <span className="flex items-center gap-1"><Calendar className="h-4 w-4"/> {new Date(selectedEval.created_at).toLocaleDateString('fr-FR')}</span>
+              </div>
             </div>
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-full ${sc.bg} ${sc.color} font-semibold`}>
-              <StatusIcon className="h-5 w-5" />
-              {evaluation.riskLevel}
+            <div className={`flex flex-col items-end px-4 py-2 rounded-xl ${sc.bg} border border-${sc.color.split('-')[1]}-200`}>
+              <div className={`flex items-center gap-2 font-bold ${sc.color}`}>
+                <StatusIcon className="h-5 w-5" />
+                {selectedEval.risk_level.toUpperCase()}
+              </div>
+              <span className={`text-xs font-bold mt-1 ${sc.color}`}>M-CHAT-R</span>
             </div>
           </div>
 
-          {/* Global score */}
-          <Card className="mb-6">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-medium text-muted-foreground">Score global</span>
-                <span className="text-2xl font-bold">{evaluation.globalScore}%</span>
-              </div>
-              <Progress value={evaluation.globalScore} className="h-3" />
-              <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                <span>0</span>
-                <span>50</span>
-                <span>100</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Domains */}
-          <h2 className="text-lg font-semibold mb-4">Résultats par domaine</h2>
-          <div className="grid gap-4 md:grid-cols-2 mb-6">
-            {evaluation.domains.map(d => {
-              const ds = statusConfig[d.status];
-              const DIcon = d.icon;
-              const pct = Math.round((d.score / d.maxScore) * 100);
-              return (
-                <Card key={d.name} className="overflow-hidden">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className={`h-10 w-10 rounded-lg ${ds.bg} flex items-center justify-center`}>
-                        <DIcon className={`h-5 w-5 ${ds.color}`} />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{d.name}</p>
-                        <p className="text-xs text-muted-foreground">{d.score}/{d.maxScore}</p>
-                      </div>
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ds.bg} ${ds.color}`}>{ds.label}</span>
-                    </div>
-                    <Progress value={pct} className="h-2" />
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          {/* Recommendations */}
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="text-lg">Recommandations</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {evaluation.recommendations.map((r, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                  <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0 mt-0.5">
-                    {i + 1}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            {/* Colonne de gauche : Score et Recommandations */}
+            <div className="md:col-span-2 space-y-6">
+              <Card className="border-t-4 border-t-primary shadow-md">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Score M-CHAT-R</span>
+                    <span className={`text-3xl font-black ${sc.color}`}>{selectedEval.score}<span className="text-xl text-slate-300">/20</span></span>
                   </div>
-                  <p className="text-sm">{r}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                  <Progress value={scorePercentage} className="h-3" />
+                  <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+                    <span>Faible (0-2)</span>
+                    <span>Moyen (3-7)</span>
+                    <span>Élevé (8-20)</span>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <div className="flex gap-3">
-            <Button className="flex-1 gap-2"><Download className="h-4 w-4" /> Télécharger le rapport</Button>
-            <Button variant="outline" className="flex-1 gap-2"><FileText className="h-4 w-4" /> Partager avec un professionnel</Button>
+              <Card className="shadow-md">
+                <CardHeader className="bg-slate-50 border-b pb-4">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-primary" /> Recommandations cliniques
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-4">
+                  {statusKey === 'normal' && (
+                    <div className="flex items-start gap-3 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                      <CheckCircle2 className="h-6 w-6 text-emerald-600 shrink-0" />
+                      <p className="text-sm font-medium text-emerald-800">Aucune action immédiate n'est requise. Poursuivez le suivi pédiatrique classique de l'enfant et les activités d'éveil.</p>
+                    </div>
+                  )}
+                  {statusKey === 'warning' && (
+                    <div className="flex items-start gap-3 bg-amber-50 p-4 rounded-xl border border-amber-100">
+                      <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" />
+                      <p className="text-sm font-medium text-amber-800">Une évaluation détaillée de suivi (M-CHAT-R/F) ou une consultation avec un spécialiste est recommandée pour approfondir les observations.</p>
+                    </div>
+                  )}
+                  {statusKey === 'alert' && (
+                    <div className="flex items-start gap-3 bg-red-50 p-4 rounded-xl border border-red-100">
+                      <AlertTriangle className="h-6 w-6 text-red-600 shrink-0" />
+                      <p className="text-sm font-medium text-red-800">Une orientation urgente vers un spécialiste du neurodéveloppement (pédopsychiatre, neuropédiatre) pour une évaluation diagnostique complète est fortement recommandée.</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Colonne de droite : Infos Contacts */}
+            <div className="space-y-6">
+              <Card className="shadow-md">
+                <CardHeader className="bg-slate-50 border-b pb-4">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Users className="h-5 w-5 text-primary" /> Contacts
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 space-y-4">
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase">Parent / Tuteur</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <User className="h-4 w-4 text-slate-400" />
+                      <span className="font-semibold text-slate-700">{selectedEval.parent_name || 'Non renseigné'}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase">Téléphone</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Phone className="h-4 w-4 text-slate-400" />
+                      <span className="font-semibold text-slate-700">{selectedEval.parent_contact || 'Non renseigné'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex flex-col gap-3">
+                <Button className="w-full gap-2 shadow-md"><Download className="h-4 w-4" /> Télécharger le rapport</Button>
+                {statusKey !== 'normal' && (
+                  <Button variant="outline" className="w-full gap-2 border-primary text-primary">
+                    <FileText className="h-4 w-4" /> Orienter vers un médecin
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </DashboardLayout>
     );
   }
 
-  // Child evaluations list
-  if (child) {
-    return (
-      <DashboardLayout>
-        <div className="max-w-4xl mx-auto">
-          <Button variant="ghost" className="mb-4" onClick={() => setSelectedChild(null)}>
-            ← Retour aux enfants
-          </Button>
-          <div className="flex items-center gap-4 mb-6">
-            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
-              {child.avatar}
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold">{child.childName}</h1>
-              <p className="text-muted-foreground">{child.childAge}</p>
-            </div>
-          </div>
-
-          <h2 className="font-semibold mb-4">Historique des évaluations ({child.evaluations.length})</h2>
-          <div className="space-y-3">
-            {child.evaluations.map(ev => {
-              const sc = statusConfig[ev.status];
-              const StatusIcon = sc.icon;
-              return (
-                <Card key={ev.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedEval(ev.id)}>
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className={`h-12 w-12 rounded-xl ${sc.bg} flex items-center justify-center`}>
-                      <StatusIcon className={`h-6 w-6 ${sc.color}`} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-semibold">{ev.name}</p>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{new Date(ev.date).toLocaleDateString('fr-FR')}</span>
-                        <span>Score: {ev.globalScore}%</span>
-                      </div>
-                    </div>
-                    <span className={`text-xs font-semibold px-3 py-1.5 rounded-full ${sc.bg} ${sc.color}`}>{ev.riskLevel}</span>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  // Main overview
+  // ---------------------------------------------------------------------------
+  // VUE 1 : VUE PRINCIPALE (Liste des dépistages et statistiques)
+  // ---------------------------------------------------------------------------
   return (
     <DashboardLayout>
-      <h1 className="text-2xl font-bold mb-6">Résultats & Suivi</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Résultats & Dépistages (M-CHAT-R)</h1>
+      </div>
 
-      {/* Stats */}
+      {/* Cartes de Statistiques */}
       <div className="grid gap-4 md:grid-cols-4 mb-8">
         {[
-          { label: 'Total évaluations', value: totalEvals, icon: BarChart3, color: 'text-primary', bg: 'bg-primary/10' },
-          { label: 'Résultats normaux', value: normalCount, icon: CheckCircle2, color: 'text-secondary', bg: 'bg-secondary/10' },
-          { label: 'En surveillance', value: warningCount, icon: Clock, color: 'text-accent', bg: 'bg-accent/10' },
-          { label: 'Alertes', value: alertCount, icon: AlertTriangle, color: 'text-destructive', bg: 'bg-destructive/10' },
-        ].map(s => (
-          <Card key={s.label}>
-            <CardContent className="p-4 flex items-center gap-4">
+          { label: 'Total dépistages', value: totalEvals, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-100' },
+          { label: 'Risque Élevé', value: alertCount, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100' },
+          { label: 'Risque Moyen', value: warningCount, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100' },
+          { label: 'Risque Faible', value: normalCount, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
+        ].map((s, idx) => (
+          <Card key={idx} className="shadow-sm">
+            <CardContent className="p-5 flex items-center gap-4">
               <div className={`h-12 w-12 rounded-xl ${s.bg} flex items-center justify-center`}>
                 <s.icon className={`h-6 w-6 ${s.color}`} />
               </div>
               <div>
-                <p className="text-2xl font-bold">{s.value}</p>
-                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className="text-2xl font-black text-slate-800">{isLoading ? '-' : s.value}</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{s.label}</p>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Children list */}
-      <Tabs defaultValue="all">
-        <TabsList className="mb-4">
-          <TabsTrigger value="all">Tous les enfants</TabsTrigger>
-          <TabsTrigger value="alert">Alertes</TabsTrigger>
-          <TabsTrigger value="warning">Surveillance</TabsTrigger>
-          <TabsTrigger value="normal">Normaux</TabsTrigger>
+      {/* Liste des enfants */}
+      <Tabs defaultValue="all" className="w-full">
+        <TabsList className="mb-6 bg-slate-200/50 p-1">
+          <TabsTrigger value="all" className="font-bold">Tous les enfants</TabsTrigger>
+          <TabsTrigger value="alert" className="font-bold text-red-600 data-[state=active]:bg-red-100">Risque Élevé</TabsTrigger>
+          <TabsTrigger value="warning" className="font-bold text-amber-600 data-[state=active]:bg-amber-100">Risque Moyen</TabsTrigger>
+          <TabsTrigger value="normal" className="font-bold text-emerald-600 data-[state=active]:bg-emerald-100">Risque Faible</TabsTrigger>
         </TabsList>
 
-        {['all', 'alert', 'warning', 'normal'].map(tab => (
-          <TabsContent key={tab} value={tab}>
-            <div className="space-y-3">
-              {mockChildren
-                .filter(c => tab === 'all' || c.evaluations.some(e => e.status === tab))
-                .map(c => {
-                  const latestEval = c.evaluations[0];
-                  const sc = statusConfig[latestEval.status];
-                  const StatusIcon = sc.icon;
-                  return (
-                    <Card key={c.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedChild(c.id)}>
-                      <CardContent className="p-4 flex items-center gap-4">
-                        <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                          {c.avatar}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-semibold">{c.childName}</p>
-                          <p className="text-sm text-muted-foreground">{c.childAge} · {c.evaluations.length} évaluation(s)</p>
-                        </div>
-                        <div className="text-right mr-2">
-                          <p className="text-sm font-medium">Dernier : {latestEval.name}</p>
-                          <div className="flex items-center gap-1.5 justify-end">
-                            <StatusIcon className={`h-3.5 w-3.5 ${sc.color}`} />
-                            <span className={`text-xs font-medium ${sc.color}`}>{latestEval.riskLevel}</span>
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+            <p className="text-slate-500 font-medium">Chargement des dossiers depuis Supabase...</p>
+          </div>
+        ) : screenings.length === 0 ? (
+           <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed shadow-sm">
+             <Baby className="h-16 w-16 mx-auto text-slate-300 mb-4" />
+             <h3 className="text-xl font-bold text-slate-700">Aucun résultat</h3>
+             <p className="text-slate-500 mt-2">Aucun enfant n'a encore été recensé sur le terrain.</p>
+           </div>
+        ) : (
+          ['all', 'alert', 'warning', 'normal'].map(tab => (
+            <TabsContent key={tab} value={tab} className="mt-0">
+              <div className="grid gap-3">
+                {screenings
+                  .filter(c => tab === 'all' || getStatusKey(c.risk_level) === tab)
+                  .map(c => {
+                    const statusKey = getStatusKey(c.risk_level);
+                    const sc = statusConfig[statusKey];
+                    const StatusIcon = sc.icon;
+
+                    return (
+                      <Card 
+                        key={c.id} 
+                        className={`cursor-pointer hover:shadow-md transition-all border-l-4 ${
+                          statusKey === 'alert' ? 'border-l-red-500' : 
+                          statusKey === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500'
+                        }`} 
+                        onClick={() => setSelectedChildId(c.id)}
+                      >
+                        <CardContent className="p-4 flex items-center gap-5">
+                          {/* Avatar Prénom */}
+                          <div className={`h-12 w-12 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${sc.bg} ${sc.color}`}>
+                            {c.child_name.charAt(0).toUpperCase()}
                           </div>
-                        </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-            </div>
-          </TabsContent>
-        ))}
+                          
+                          {/* Infos Patient */}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-lg text-slate-800 truncate">{c.child_name}</p>
+                            <p className="text-sm font-medium text-slate-500 flex items-center gap-2">
+                              {calculateAge(c.dob)} · M-CHAT-R ({new Date(c.created_at).toLocaleDateString('fr-FR')})
+                            </p>
+                          </div>
+
+                          {/* Badge Score/Risque */}
+                          <div className="text-right mr-4">
+                            <div className={`flex items-center gap-1.5 justify-end px-3 py-1 rounded-full border ${sc.bg} border-${sc.color.split('-')[1]}-200`}>
+                              <StatusIcon className={`h-4 w-4 ${sc.color}`} />
+                              <span className={`text-sm font-bold uppercase ${sc.color}`}>{c.risk_level} (Score: {c.score})</span>
+                            </div>
+                          </div>
+                          
+                          <ChevronRight className="h-6 w-6 text-slate-400" />
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </div>
+            </TabsContent>
+          ))
+        )}
       </Tabs>
     </DashboardLayout>
   );

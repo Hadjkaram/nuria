@@ -1,347 +1,353 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertTriangle, ClipboardList, Calendar, User, Loader2, LogOut, Baby, ShieldCheck } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { MapPin, ClipboardList, Calendar, Baby, Loader2, LogOut, CheckCircle2, User, Phone, AlertTriangle, ShieldCheck, Plus, ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/hooks/use-toast';
 
-// --- LISTE DES QUESTIONS (Propriété NURIA) ---
-const NURIA_QUESTIONS = [
-  { id: 'q1', text: "L'enfant réagit-il lorsque vous l'appelez par son nom ?", section: "Communication Sociale" },
-  { id: 'q2', text: "L'enfant établit-il un contact visuel lorsqu'il parle ou joue avec les autres ?", section: "Communication Sociale" },
-  { id: 'q3', text: "L'enfant manifeste-t-il de l'intérêt pour les autres enfants et essaie-t-il de jouer avec eux ?", section: "Communication Sociale" },
-  { id: 'q4', text: "L'enfant partage-t-il des choses avec vous ou d'autres personnes (de son propre chef) ?", section: "Communication Sociale" },
-  { id: 'q5', text: "L'enfant essaie-t-il de vous réconforter ou de réconforter les autres lorsqu'il est contrarié ou blessé ?", section: "Communication Sociale" },
-  { id: 'q6', text: "L'enfant aime-t-il être avec d'autres personnes et recherche-t-il les interactions sociales ?", section: "Communication Sociale" },
-  { id: 'q7', text: "L'enfant comprend-il des instructions simples sans gestes ni démonstrations ?", section: "Communication Sociale" },
-  { id: 'q8', text: "L'enfant peut-il tenir une conversation (s'il est assez âgé pour parler) ?", section: "Communication Sociale" },
-  { id: 'q9', text: "L'enfant utilise-t-il des gestes comme pointer du doigt, faire signe de la main ou hocher la tête pour communiquer ?", section: "Communication Sociale" },
-  { id: 'q10', text: "L'enfant vous montre-t-il des choses qui l'intéressent (juste pour partager) ?", section: "Communication Sociale" },
-  { id: 'q11', text: "L'enfant manifeste-t-il un intérêt très marqué pour des sujets ou des objets spécifiques qui semblent inhabituels ?", section: "Comportements Répétitifs" },
-  { id: 'q12', text: "L'enfant insiste-t-il pour faire les choses de la même manière à chaque fois et se met-il très en colère si les habitudes changent ?", section: "Comportements Répétitifs" },
-  { id: 'q13', text: "L'enfant répète-t-il des mouvements de façon répétée, comme se balancer, tourner sur lui-même ou agiter les mains ?", section: "Comportements Répétitifs" },
-  { id: 'q14', text: "L'enfant répète-t-il des mots ou des phrases sans cesse (écholalie) ?", section: "Comportements Répétitifs" },
-  { id: 'q15', text: "L'enfant aligne-t-il ses jouets ou objets d'une manière particulière et se fâche-t-il s'ils sont déplacés ?", section: "Comportements Répétitifs" },
-  { id: 'q16', text: "L'enfant se concentre-t-il sur des parties d'objets (comme les roues d'une petite voiture) plutôt que sur l'objet entier ?", section: "Comportements Répétitifs" },
-  { id: 'q17', text: "L'enfant a-t-il des attachements inhabituels à des objets spécifiques (autres que couverture préférée) ?", section: "Comportements Répétitifs" },
-  { id: 'q18', text: "L'enfant semble-t-il hypersensible aux bruits, se bouche-t-il les oreilles ?", section: "Réponses Sensorielles" },
-  { id: 'q19', text: "L'enfant semble-t-il hypersensible au toucher, évitant les câlins ou certaines textures ?", section: "Réponses Sensorielles" },
-  { id: 'q20', text: "L'enfant recherche-t-il ou évite-t-il certaines odeurs ou certains goûts de manière inhabituelle ?", section: "Réponses Sensorielles" },
-  { id: 'q21', text: "L'enfant semble-t-il ne pas ressentir la douleur ou les températures extrêmes ?", section: "Réponses Sensorielles" },
-  { id: 'q22', text: "L'enfant fixe-t-il plus que les autres les lumières, les objets qui tournent ou en mouvement ?", section: "Réponses Sensorielles" },
-  { id: 'q23', text: "Si l'enfant parle, utilise-t-il le langage de manière inhabituelle (voix monotone, répète publicités) ?", section: "Langage et Communication" },
-  { id: 'q24', text: "L'enfant a-t-il des difficultés à comprendre les blagues, le sarcasme ou le langage figuré ?", section: "Langage et Communication" },
-  { id: 'q25', text: "L'enfant interprète-t-il les choses de manière très littérale ?", section: "Langage et Communication" },
-  { id: 'q26', text: "L'enfant a-t-il des difficultés à se faire des amis ou à garder des amis du même âge ?", section: "Interaction Sociale" },
-  { id: 'q27', text: "L'enfant préfère-t-il jouer seul plutôt qu'avec les autres ?", section: "Interaction Sociale" },
-  { id: 'q28', text: "L'enfant a-t-il des difficultés à comprendre les sentiments des autres ou à y répondre ?", section: "Interaction Sociale" },
-  { id: 'q29', text: "L'enfant a-t-il des difficultés à respecter son tour dans les conversations ou les activités ?", section: "Interaction Sociale" },
-  { id: 'q30', text: "L'enfant semble-t-il ignorer les règles sociales ou se comporte-t-il de manière jugée inappropriée ?", section: "Interaction Sociale" },
+// --- LISTE DES VILLES DE CÔTE D'IVOIRE ---
+const IVORIAN_CITIES = [
+  "Abidjan", "Bouaké", "Daloa", "Yamoussoukro", "San-Pédro", "Korhogo", "Man", "Divo", 
+  "Gagnoa", "Abengourou", "Anyama", "Odienné", "Agboville", "Sinfra", "Bondoukou", "Seguela"
+];
+
+// --- QUESTIONS M-CHAT-R ---
+const M_CHAT_R_QUESTIONS = [
+  { id: 'q1', text: "Si vous pointez du doigt quelque chose de l'autre côté de la pièce, est-ce que votre enfant le regarde ?" },
+  { id: 'q2', text: "Vous êtes-vous déjà demandé si votre enfant pouvait être sourd ?" },
+  { id: 'q3', text: "Est-ce que votre enfant joue à faire semblant ? (ex: faire semblant de boire dans une tasse vide)" },
+  { id: 'q4', text: "Est-ce que votre enfant aime grimper sur des choses ? (ex: meubles, marches d'escalier)" },
+  { id: 'q5', text: "Est-ce que votre enfant fait des gestes inhabituels avec ses doigts près de ses yeux ?" },
+  { id: 'q6', text: "Est-ce que votre enfant pointe du doigt pour demander quelque chose, ou pour avoir de l'aide ?" },
+  { id: 'q7', text: "Est-ce que votre enfant pointe du doigt pour vous montrer quelque chose d'intéressant ?" },
+  { id: 'q8', text: "Est-ce que votre enfant s'intéresse aux autres enfants ?" },
+  { id: 'q9', text: "Est-ce que votre enfant vous montre des choses en les apportant ou en les tenant pour que vous les voyiez ?" },
+  { id: 'q10', text: "Est-ce que votre enfant répond quand vous l'appelez par son nom ?" },
+  { id: 'q11', text: "Lorsque vous lui souriez, est-ce que votre enfant vous sourit en retour ?" },
+  { id: 'q12', text: "Est-ce que votre enfant semble dérangé par les bruits quotidiens ? (ex: aspirateur ou musique forte)" },
+  { id: 'q13', text: "Est-ce que votre enfant marche ?" },
+  { id: 'q14', text: "Est-ce que votre enfant vous regarde dans les yeux quand vous lui parlez, jouez avec lui ou l'habillez ?" },
+  { id: 'q15', text: "Est-ce que votre enfant essaie de copier ce que vous faites ? (ex: faire au revoir, applaudir)" },
+  { id: 'q16', text: "Si vous tournez la tête pour regarder quelque chose, est-ce que votre enfant tourne la tête pour voir ce que vous regardez ?" },
+  { id: 'q17', text: "Est-ce que votre enfant essaie de vous faire regarder ce qu'il regarde ?" },
+  { id: 'q18', text: "Est-ce que votre enfant comprend ce que vous lui dites de faire ?" },
+  { id: 'q19', text: "Si quelque chose de nouveau arrive, est-ce que votre enfant regarde votre visage pour voir comment vous réagissez ?" },
+  { id: 'q20', text: "Est-ce que votre enfant aime les activités de mouvement ? (ex: être balancé ou sauter sur vos genoux)" },
 ];
 
 const NasqScreeningModule: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-
-  // --- SÉCURITÉ ANTI-INTRUSION ---
-  useEffect(() => {
-    if (!user) {
-      navigate('/login-agent');
-    }
-  }, [user, navigate]);
+  const { toast } = useToast();
   
-  const [sites, setSites] = useState<any[]>([]);
-  const [specialists, setSpecialists] = useState<any[]>([]);
+  // États du formulaire
+  const [childName, setChildName] = useState('');
+  const [dob, setDob] = useState('');
+  const [gender, setGender] = useState('');
+  const [location, setLocation] = useState('');
+  const [parentName, setParentName] = useState('');
+  const [parentContact, setParentContact] = useState('');
   
-  const [childData, setChildData] = useState({
-    firstName: '',
-    lastName: '',
-    dob: '',
-    gender: 'M',
-    parentName: '',
-    parentPhone: ''
-  });
-  
-  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
-  const [answers, setAnswers] = useState<Record<string, number>>({});
-  
+  // Réponses et États d'envoi
+  const [answers, setAnswers] = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showReferralModal, setShowReferralModal] = useState(false);
-  const [finalScore, setFinalScore] = useState<number | null>(null);
   
-  const [newlyCreatedChildId, setNewlyCreatedChildId] = useState<string | null>(null);
-  const [appointmentDate, setAppointmentDate] = useState('');
-  const [selectedSpecialistId, setSelectedSpecialistId] = useState<string>('');
+  // --- NOUVEAU : État pour l'écran de résultat ---
+  const [submittedResult, setSubmittedResult] = useState<{score: number, risk: any} | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const { data: sitesData } = await supabase.from('screening_sites').select('*');
-      if (sitesData) setSites(sitesData);
+  const handleAnswer = (qId: string, value: boolean) => {
+    setAnswers(prev => ({ ...prev, [qId]: value }));
+  };
 
-      const { data: specData } = await supabase.from('profiles').select('*').eq('role', 'professional');
-      if (specData) setSpecialists(specData);
-    };
-    fetchData();
-  }, []);
+  // --- LOGIQUE DE SCORING OFFICIELLE M-CHAT-R ---
+  const calculateScore = () => {
+    let score = 0;
+    M_CHAT_R_QUESTIONS.forEach((q, index) => {
+      const qNum = index + 1;
+      const answer = answers[q.id];
+      if (answer === undefined) return;
 
-  const handleAnswer = (questionId: string, value: number) => {
-    setAnswers(prev => ({ ...prev, [questionId]: value }));
+      // Pour les items 2, 5 et 12, la réponse "OUI" indique un risque (+1 point)
+      if (qNum === 2 || qNum === 5 || qNum === 12) {
+        if (answer === true) score += 1;
+      } 
+      // Pour tous les autres items, la réponse "NON" indique un risque (+1 point)
+      else {
+        if (answer === false) score += 1;
+      }
+    });
+    return score;
+  };
+
+  const getRiskLevel = (score: number) => {
+    if (score <= 2) return { label: "Risque Faible", color: "text-emerald-600", bg: "bg-emerald-100", borderTop: "border-t-emerald-500", icon: <ShieldCheck className="h-12 w-12 text-emerald-600" /> };
+    if (score <= 7) return { label: "Risque Moyen", color: "text-amber-600", bg: "bg-amber-100", borderTop: "border-t-amber-500", icon: <AlertTriangle className="h-12 w-12 text-amber-600" /> };
+    return { label: "Risque Élevé", color: "text-red-600", bg: "bg-red-100", borderTop: "border-t-red-500", icon: <AlertTriangle className="h-12 w-12 text-red-600" /> };
   };
 
   const answeredCount = Object.keys(answers).length;
-  const isChildFormValid = childData.firstName && childData.lastName && childData.dob && selectedSiteId;
+  const currentScore = calculateScore();
+  const riskStatus = getRiskLevel(currentScore);
 
-  const handleSubmitTest = async () => {
-    if (!isChildFormValid || !user || answeredCount < 30) return;
-    setIsSubmitting(true);
-
-    try {
-      const { data: insertedChild, error: childError } = await supabase
-        .from('children')
-        .insert([{
-          first_name: childData.firstName,
-          last_name: childData.lastName,
-          dob: childData.dob,
-          gender: childData.gender,
-          parent_name: childData.parentName,
-          site_id: selectedSiteId,
-          user_id: user.id,
-          status: 'active'
-        }])
-        .select()
-        .single();
-
-      if (childError) throw childError;
-      
-      const childId = insertedChild.id;
-      setNewlyCreatedChildId(childId);
-
-      const score = Object.values(answers).reduce((acc, val) => acc + val, 0);
-      const needsReferral = score >= 8;
-      setFinalScore(score);
-
-      const { error: nuriaError } = await supabase.from('nuria_results').insert([{
-        child_id: childId,
-        agent_id: user.id,
-        answers: answers,
-        total_score: score,
-        needs_referral: needsReferral
-      }]);
-
-      if (nuriaError) throw nuriaError;
-
-      if (needsReferral) {
-        setShowReferralModal(true);
-      } else {
-        alert(`Évaluation NURIA terminée. Score : ${score}/30. Aucun risque majeur détecté.`);
-        resetForm();
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Erreur lors de l'enregistrement des données.");
-    } finally {
-      setIsSubmitting(false);
+  const handleSubmit = async () => {
+    if (!childName || !dob || !gender || !location || answeredCount < M_CHAT_R_QUESTIONS.length) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez remplir toutes les informations obligatoires (*) et répondre aux 20 questions.",
+        variant: "destructive"
+      });
+      return;
     }
-  };
 
-  const handleBookAppointment = async () => {
-    if (!newlyCreatedChildId || !user || !appointmentDate || !selectedSpecialistId) return;
     setIsSubmitting(true);
-
+    
     try {
-      const { error } = await supabase.from('appointments').insert([{
-        child_id: newlyCreatedChildId,
-        agent_id: user.id,
-        specialist_id: selectedSpecialistId,
-        appointment_date: new Date(appointmentDate).toISOString(),
-        reason: `Suspicion de TND suite au Formulaire NURIA (Score: ${finalScore}/30)`
+      const { error } = await supabase.from('screenings').insert([{
+        agent_id: user?.id,
+        child_name: childName,
+        dob: dob,
+        gender: gender,
+        location: location,
+        parent_name: parentName,
+        parent_contact: parentContact,
+        responses: answers,
+        score: currentScore,
+        risk_level: riskStatus.label,
+        created_at: new Date().toISOString()
       }]);
 
       if (error) throw error;
       
-      alert("Rendez-vous confirmé. L'enfant a été enregistré et orienté avec succès.");
-      setShowReferralModal(false);
-      resetForm();
-    } catch (err) {
-      console.error(err);
-      alert("Erreur lors de la prise de rendez-vous.");
+      // AFFICHER LE BEAU RESULTAT (on remonte la page doucement)
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setSubmittedResult({ score: currentScore, risk: riskStatus });
+
+    } catch (err: any) {
+      toast({
+        title: "Erreur de sauvegarde",
+        description: err.message,
+        variant: "destructive"
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const resetForm = () => {
+    setSubmittedResult(null);
     setAnswers({});
-    setChildData({ firstName: '', lastName: '', dob: '', gender: 'M', parentName: '', parentPhone: '' });
-    setSelectedSiteId('');
-    setFinalScore(null);
-    setNewlyCreatedChildId(null);
+    setChildName('');
+    setDob('');
+    setGender('');
+    setLocation('');
+    setParentName('');
+    setParentContact('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login-agent');
-  };
+  // -------------------------------------------------------------------------
+  // ÉCRAN DE RÉSULTAT PRO ET DESIGN
+  // -------------------------------------------------------------------------
+  if (submittedResult) {
+    return (
+      <div className="min-h-screen bg-slate-50 pb-20">
+        <div className="bg-primary text-white p-6 shadow-md flex justify-between items-center">
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <ClipboardList /> Recensement NURIA
+            </h1>
+          </div>
+          <Button variant="ghost" className="text-white" onClick={() => { logout(); navigate('/login'); }}>
+            <LogOut className="h-5 w-5 mr-2" /> Quitter
+          </Button>
+        </div>
 
-  if (!user) return null;
+        <div className="container max-w-xl mx-auto mt-12 px-4">
+          <Card className={`border-t-8 shadow-2xl animate-in zoom-in slide-in-from-bottom-8 duration-500 ${submittedResult.risk.borderTop}`}>
+            <CardContent className="pt-12 pb-10 flex flex-col items-center text-center space-y-6">
+              
+              {/* Icône animée */}
+              <div className={`w-24 h-24 rounded-full flex items-center justify-center animate-in zoom-in delay-200 duration-500 ${submittedResult.risk.bg}`}>
+                {submittedResult.risk.icon}
+              </div>
+              
+              <div>
+                <h2 className="text-3xl font-bold text-slate-800 mb-2">Évaluation enregistrée</h2>
+                <p className="text-muted-foreground">Le dossier de <strong className="text-foreground">{childName}</strong> a été sauvegardé avec succès sur la plateforme NURIA.</p>
+              </div>
 
+              {/* Bloc Score central */}
+              <div className="bg-slate-50 w-full rounded-2xl p-6 border shadow-inner">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Score M-CHAT-R</p>
+                <div className="flex items-baseline justify-center gap-1 mb-4">
+                  <span className={`text-7xl font-black ${submittedResult.risk.color}`}>{submittedResult.score}</span>
+                  <span className="text-3xl font-bold text-slate-300">/20</span>
+                </div>
+                <div className={`inline-block px-6 py-2 rounded-full font-bold text-lg ${submittedResult.risk.bg} ${submittedResult.risk.color}`}>
+                  {submittedResult.risk.label}
+                </div>
+              </div>
+
+              {/* Recommandations */}
+              <div className="text-sm text-slate-600 max-w-sm mt-4 leading-relaxed">
+                {submittedResult.score <= 2 && "Aucune action immédiate n'est requise. Poursuivez le suivi pédiatrique classique de l'enfant."}
+                {(submittedResult.score >= 3 && submittedResult.score <= 7) && "Une évaluation détaillée de suivi (M-CHAT-R/F) ou une consultation avec un spécialiste est recommandée pour approfondir les observations."}
+                {submittedResult.score >= 8 && "Une orientation rapide vers un spécialiste (pédopsychiatre, neuropédiatre) pour une évaluation diagnostique complète est fortement recommandée."}
+              </div>
+
+              {/* Actions */}
+              <div className="w-full grid grid-cols-1 gap-3 pt-6 mt-4 border-t">
+                <Button size="lg" className="w-full h-14 text-lg shadow-lg" onClick={resetForm}>
+                  <Plus className="mr-2" /> Nouveau recensement
+                </Button>
+                {submittedResult.score >= 3 && (
+                  <Button variant="outline" size="lg" className="w-full h-14 text-lg border-primary text-primary" onClick={() => navigate('/dashboard')}>
+                    Aller au tableau de bord <ArrowRight className="ml-2 h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // ÉCRAN DU FORMULAIRE (Affiché par défaut)
+  // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-50 pb-24">
-      <header className="bg-primary text-primary-foreground sticky top-0 z-50 shadow-md">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-6 w-6 text-amber-400" />
-            <span className="font-bold text-lg tracking-tight">NURIA Terrain</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium hidden sm:inline-block">Agent : {user?.lastName}</span>
-            <Button variant="secondary" size="sm" onClick={handleLogout} className="h-8">
-              <LogOut className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Quitter</span>
-            </Button>
-          </div>
+    <div className="min-h-screen bg-slate-50 pb-20">
+      {/* Header */}
+      <div className="bg-primary text-white p-6 shadow-md flex justify-between items-center sticky top-0 z-10">
+        <div>
+          <h1 className="text-xl font-bold flex items-center gap-2">
+            <ClipboardList /> Recensement NURIA (M-CHAT-R)
+          </h1>
+          <p className="text-sm opacity-80">Agent : {user?.firstName} {user?.lastName}</p>
         </div>
-      </header>
+        <Button variant="ghost" className="text-white hover:bg-white/20" onClick={() => { logout(); navigate('/login'); }}>
+          <LogOut className="h-5 w-5 mr-2" /> Quitter
+        </Button>
+      </div>
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-primary">Formulaire de Dépistage NURIA</h1>
-          <p className="text-muted-foreground text-sm mt-1">Outil propriétaire de recensement communautaire</p>
-        </div>
+      <div className="container max-w-2xl mx-auto mt-8 px-4 space-y-6">
+        {/* Section Information */}
+        <Card className="shadow-sm border-t-4 border-t-primary">
+          <CardContent className="pt-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 font-semibold"><Baby className="h-4 w-4 text-primary" /> Nom de l'enfant <span className="text-red-500">*</span></Label>
+                <Input placeholder="Prénom Nom" value={childName} onChange={(e) => setChildName(e.target.value)} className="bg-white" />
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 font-semibold"><Calendar className="h-4 w-4 text-primary" /> Date de naissance <span className="text-red-500">*</span></Label>
+                <Input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="bg-white" />
+              </div>
 
-        <Card className="mb-8 border-primary/20 shadow-sm">
-          <CardContent className="pt-6">
-            <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-primary">
-              <Baby className="h-5 w-5" /> Informations de l'enfant
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div className="space-y-2">
-                <Label>Prénom de l'enfant *</Label>
-                <Input placeholder="Ex: Amadou" value={childData.firstName} onChange={(e) => setChildData({...childData, firstName: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>Nom de l'enfant *</Label>
-                <Input placeholder="Ex: Diallo" value={childData.lastName} onChange={(e) => setChildData({...childData, lastName: e.target.value})} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="space-y-2">
-                <Label>Date de naissance *</Label>
-                <Input type="date" value={childData.dob} onChange={(e) => setChildData({...childData, dob: e.target.value})} />
-              </div>
-              <div className="space-y-2">
-                <Label>Genre</Label>
-                <Select value={childData.gender} onValueChange={(val) => setChildData({...childData, gender: val})}>
-                  <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
+                <Label className="font-semibold">Genre <span className="text-red-500">*</span></Label>
+                <Select onValueChange={setGender} value={gender}>
+                  <SelectTrigger className="bg-white"><SelectValue placeholder="Choisir" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="M">Masculin</SelectItem>
                     <SelectItem value="F">Féminin</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
               <div className="space-y-2">
-                <Label>Lieu de recensement *</Label>
-                <Select onValueChange={setSelectedSiteId} value={selectedSiteId}>
-                  <SelectTrigger className="bg-white"><SelectValue placeholder="Choisir le site..." /></SelectTrigger>
+                <Label className="flex items-center gap-2 font-semibold"><MapPin className="h-4 w-4 text-primary" /> Lieu de recensement <span className="text-red-500">*</span></Label>
+                <Select onValueChange={setLocation} value={location}>
+                  <SelectTrigger className="bg-white"><SelectValue placeholder="Choisir la ville..." /></SelectTrigger>
                   <SelectContent>
-                    {sites.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.city})</SelectItem>)}
+                    {IVORIAN_CITIES.map(city => (
+                      <SelectItem key={city} value={city}>{city}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4 mt-2">
               <div className="space-y-2">
-                <Label>Nom du parent / tuteur</Label>
-                <Input placeholder="Ex: Fatou Diallo" value={childData.parentName} onChange={(e) => setChildData({...childData, parentName: e.target.value})} />
+                <Label className="flex items-center gap-2 font-semibold"><User className="h-4 w-4 text-slate-500" /> Nom du parent / tuteur</Label>
+                <Input placeholder="Prénom Nom" value={parentName} onChange={(e) => setParentName(e.target.value)} className="bg-white" />
               </div>
+
               <div className="space-y-2">
-                <Label>Contact du parent</Label>
-                <Input placeholder="Numéro de téléphone" value={childData.parentPhone} onChange={(e) => setChildData({...childData, parentPhone: e.target.value})} />
+                <Label className="flex items-center gap-2 font-semibold"><Phone className="h-4 w-4 text-slate-500" /> Contact du parent</Label>
+                <Input type="tel" placeholder="Ex: 0102030405" value={parentContact} onChange={(e) => setParentContact(e.target.value)} className="bg-white" />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="space-y-8">
-          {Array.from(new Set(NURIA_QUESTIONS.map(q => q.section))).map((sectionTitle, index) => (
-            <div key={index} className="space-y-4">
-              <h2 className="text-lg font-bold border-b pb-2 text-primary">Section {index + 1}: {sectionTitle}</h2>
-              <div className="grid grid-cols-1 gap-3">
-                {NURIA_QUESTIONS.filter(q => q.section === sectionTitle).map((q, i) => (
-                  <div key={q.id} className="bg-white p-4 rounded-xl border border-border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <p className="text-sm flex-1 font-medium"><span className="text-muted-foreground mr-2">{i+1}.</span>{q.text}</p>
-                    <div className="flex gap-2 w-full sm:w-auto shrink-0">
-                      <Button variant={answers[q.id] === 0 ? "default" : "outline"} className={answers[q.id] === 0 ? "bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto" : "w-full sm:w-auto"} onClick={() => handleAnswer(q.id, 0)}>0</Button>
-                      <Button variant={answers[q.id] === 1 ? "default" : "outline"} className={answers[q.id] === 1 ? "bg-amber-600 hover:bg-amber-700 w-full sm:w-auto" : "w-full sm:w-auto"} onClick={() => handleAnswer(q.id, 1)}>1</Button>
-                    </div>
+        {/* Section Questions */}
+        <div className="space-y-3">
+          {M_CHAT_R_QUESTIONS.map((q, index) => (
+            <Card key={q.id} className={`transition-colors duration-300 ${answers[q.id] !== undefined ? 'border-primary/40 bg-primary/5 shadow-sm' : 'hover:border-primary/20'}`}>
+              <CardContent className="p-5">
+                <div className="flex flex-col gap-4">
+                  <p className="text-[15px] font-medium leading-relaxed text-slate-700">
+                    <span className="text-primary mr-2 font-black text-lg">{index + 1}.</span>
+                    {q.text}
+                  </p>
+                  <div className="flex gap-3">
+                    <Button 
+                      className={`flex-1 h-12 text-base transition-all ${answers[q.id] === true ? "ring-2 ring-primary ring-offset-2 scale-[1.02]" : ""}`}
+                      variant={answers[q.id] === true ? "default" : "outline"}
+                      onClick={() => handleAnswer(q.id, true)}
+                    >Oui</Button>
+                    <Button 
+                      className={`flex-1 h-12 text-base transition-all ${answers[q.id] === false ? "ring-2 ring-destructive ring-offset-2 scale-[1.02]" : ""}`}
+                      variant={answers[q.id] === false ? "destructive" : "outline"}
+                      onClick={() => handleAnswer(q.id, false)}
+                    >Non</Button>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
-      </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-border p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-40">
-        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <p className="font-bold text-sm sm:text-base">Progression : {answeredCount} / 30 questions</p>
-            {!isChildFormValid && <p className="text-xs text-destructive">Veuillez remplir les informations de l'enfant.</p>}
-          </div>
-          <Button size="lg" className="w-full sm:w-auto" disabled={answeredCount < 30 || !isChildFormValid || isSubmitting} onClick={handleSubmitTest}>
-            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-            Enregistrer et Soumettre
-          </Button>
+        {/* Barre de progression flottante et Soumission */}
+        <div className="sticky bottom-4 z-10">
+          <Card className="shadow-2xl border-t-0 bg-white/95 backdrop-blur-md">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-sm font-bold text-slate-600">Progression</span>
+                <span className="text-sm font-bold text-primary">{answeredCount} / {M_CHAT_R_QUESTIONS.length}</span>
+              </div>
+              <div className="w-full bg-slate-200 h-2 rounded-full mb-4 overflow-hidden">
+                <div 
+                  className="bg-primary h-full transition-all duration-500 ease-out" 
+                  style={{ width: `${(answeredCount / M_CHAT_R_QUESTIONS.length) * 100}%` }}
+                />
+              </div>
+
+              <Button 
+                className="w-full h-14 text-lg shadow-lg font-bold" 
+                size="lg" 
+                disabled={isSubmitting || answeredCount < M_CHAT_R_QUESTIONS.length}
+                onClick={handleSubmit}
+              >
+                {isSubmitting ? <Loader2 className="animate-spin mr-2 h-6 w-6" /> : <CheckCircle2 className="mr-2 h-6 w-6" />}
+                {answeredCount < M_CHAT_R_QUESTIONS.length 
+                  ? `Veuillez répondre à toutes les questions` 
+                  : `Enregistrer le recensement (${currentScore}/20)`}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
+        
       </div>
-
-      <Dialog open={showReferralModal} onOpenChange={() => {}}> 
-        <DialogContent className="sm:max-w-[500px] border-destructive">
-          <DialogHeader>
-            <div className="flex items-center gap-3 text-destructive mb-2">
-              <AlertTriangle className="h-8 w-8" />
-              <DialogTitle className="text-xl">Alerte : Orientation Nécessaire</DialogTitle>
-            </div>
-            <DialogDescription className="text-base">
-              L'enfant <strong>{childData.firstName} {childData.lastName}</strong> a été enregistré.
-              Son score au Formulaire NURIA est de <strong className="text-destructive text-lg">{finalScore}/30</strong>. 
-              <strong>Vous devez immédiatement planifier un rendez-vous avec un spécialiste.</strong>
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4 mt-2 border-t">
-            <div className="space-y-2">
-              <label className="text-sm font-bold">Sélectionner un Spécialiste / Médecin</label>
-              <Select onValueChange={setSelectedSpecialistId} value={selectedSpecialistId}>
-                <SelectTrigger><SelectValue placeholder="Choisir un professionnel..." /></SelectTrigger>
-                <SelectContent>
-                  {specialists.map(s => <SelectItem key={s.id} value={s.id}>Dr. {s.first_name} {s.last_name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-bold flex items-center gap-2"><Calendar className="h-4 w-4"/> Date du rendez-vous</label>
-              <Input type="datetime-local" value={appointmentDate} onChange={(e) => setAppointmentDate(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="flex justify-end mt-4">
-            <Button variant="destructive" className="w-full" disabled={!selectedSpecialistId || !appointmentDate || isSubmitting} onClick={handleBookAppointment}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Confirmer l'orientation
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

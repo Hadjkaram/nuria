@@ -6,23 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
-import { Plus, Search, Baby, Calendar, Loader2 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Baby, Calendar, User, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 
 interface Child {
   id: string;
-  firstName: string;
-  lastName: string;
+  first_name: string;
+  last_name: string;
   dob: string;
   gender: string;
-  parentName: string;
+  parent_name: string;
   status: 'active' | 'pending' | 'completed';
 }
 
@@ -35,211 +30,158 @@ const statusColors: Record<string, string> = {
 const ChildrenModule: React.FC = () => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { toast } = useToast();
   
-  // États pour la liste et l'interface
+  // États de l'application
   const [childrenList, setChildrenList] = useState<Child[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedChild, setSelectedChild] = useState<Child | null>(null);
-
-  // États pour le formulaire d'ajout
+  const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // État du formulaire
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     dob: '',
-    gender: 'M',
+    gender: '',
     parentName: ''
   });
 
-  // 1. Lire les données depuis Supabase
+  // --- 1. LECTURE (Select) : Récupérer les enfants depuis Supabase ---
   const fetchChildren = async () => {
+    setIsLoading(true);
     try {
-      setLoading(true);
       const { data, error } = await supabase
         .from('children')
         .select('*')
-        .order('first_name', { ascending: true });
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      if (data) {
-        const formattedChildren: Child[] = data.map((item) => ({
-          id: item.id,
-          firstName: item.first_name,
-          lastName: item.last_name,
-          dob: item.dob,
-          gender: item.gender,
-          parentName: item.parent_name,
-          status: item.status as Child['status'],
-        }));
-        setChildrenList(formattedChildren);
-      }
-    } catch (error) {
-      console.error("Erreur lors de la récupération des enfants:", error);
+      setChildrenList(data || []);
+    } catch (error: any) {
+      toast({ title: "Erreur de chargement", description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
+  // Charger les données au montage du composant
   useEffect(() => {
     fetchChildren();
-  }, []);
+  }, [user]);
 
-  // 2. Ajouter un enfant dans Supabase
-  const handleAddChild = async (e: React.FormEvent) => {
+  // --- 2. ÉCRITURE (Insert) : Ajouter un nouvel enfant ---
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
-    
-    setIsSubmitting(true);
+    if (!formData.firstName || !formData.lastName || !formData.dob || !formData.gender || !formData.parentName) {
+      toast({ title: "Attention", description: "Veuillez remplir tous les champs obligatoires.", variant: "destructive" });
+      return;
+    }
 
+    setIsSubmitting(true);
     try {
-      const { error } = await supabase.from('children').insert([
-        {
-          first_name: formData.firstName,
-          last_name: formData.lastName,
-          dob: formData.dob,
-          gender: formData.gender,
-          parent_name: formData.parentName,
-          user_id: user.id, // On relie l'enfant à l'utilisateur connecté
-          status: 'active'
-        }
-      ]);
+      const { error } = await supabase.from('children').insert([{
+        user_id: user?.id,
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        dob: formData.dob,
+        gender: formData.gender,
+        parent_name: formData.parentName,
+        status: 'active'
+      }]);
 
       if (error) throw error;
 
-      // Si succès : on ferme la modale, on vide le formulaire et on rafraîchit la liste
+      toast({ title: "Succès", description: "L'enfant a été ajouté avec succès." });
       setShowForm(false);
-      setFormData({ firstName: '', lastName: '', dob: '', gender: 'M', parentName: '' });
-      fetchChildren();
-      
-    } catch (error) {
-      console.error("Erreur lors de l'ajout:", error);
-      alert("Une erreur est survenue lors de l'ajout du dossier.");
+      setFormData({ firstName: '', lastName: '', dob: '', gender: '', parentName: '' }); // Reset
+      fetchChildren(); // Rafraîchir la liste affichée
+    } catch (error: any) {
+      toast({ title: "Erreur d'ajout", description: error.message, variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filtered = childrenList.filter(c => 
-    c.firstName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.lastName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h1 className="text-2xl font-bold">{t('module.child')}</h1>
+      {/* En-tête */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Baby className="h-6 w-6 text-primary" /> 
+            Dossiers Patients / Enfants
+          </h1>
+          <p className="text-muted-foreground">Gérez la liste des enfants suivis</p>
+        </div>
         <Button onClick={() => setShowForm(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Ajouter un enfant
+          <Plus className="h-4 w-4 mr-2" /> Nouveau dossier
         </Button>
       </div>
 
-      <div className="bg-card rounded-xl border border-border p-4 mb-6 flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input 
-            type="text" 
-            placeholder="Rechercher un enfant..." 
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-input bg-background outline-none focus:ring-2 focus:ring-ring"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center items-center py-12">
+      {/* Liste des enfants */}
+      {isLoading ? (
+        <div className="flex justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      ) : selectedChild ? (
-        <div className="space-y-4">
-          <Button variant="ghost" onClick={() => setSelectedChild(null)} className="mb-2">
-            ← Retour à la liste
-          </Button>
-          <div className="bg-card rounded-xl p-6 border border-border">
-            <h2 className="text-xl font-bold mb-2">{selectedChild.firstName} {selectedChild.lastName}</h2>
-            <p className="text-muted-foreground flex items-center gap-2 mb-6">
-              <Baby className="h-4 w-4" /> Date de naissance : {selectedChild.dob}
-            </p>
-            <div className="bg-muted rounded-lg p-6 text-center text-muted-foreground">
-              Détails du dossier à venir...
-            </div>
-          </div>
-        </div>
       ) : (
-        <div className="space-y-2">
-          {filtered.map(child => (
-            <button key={child.id} onClick={() => setSelectedChild(child)} className="w-full bg-card rounded-xl p-4 border border-border hover:shadow-md transition-shadow flex items-center justify-between text-left">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                  {child.firstName[0]}
-                </div>
-                <div>
-                  <div className="font-medium">{child.firstName} {child.lastName}</div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-2">
-                    <Calendar className="h-3 w-3" /> {child.dob} · {child.parentName}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {childrenList.length === 0 ? (
+            <div className="col-span-full text-center py-12 bg-card border rounded-xl">
+              <Baby className="h-12 w-12 mx-auto text-muted-foreground opacity-50 mb-3" />
+              <p className="text-muted-foreground">Aucun enfant n'est enregistré pour le moment.</p>
+              <Button variant="link" onClick={() => setShowForm(true)}>Ajouter le premier enfant</Button>
+            </div>
+          ) : (
+            childrenList.map((child) => (
+              <div key={child.id} className="bg-card rounded-xl p-5 border shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
+                    {child.first_name[0]}{child.last_name[0]}
                   </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[child.status] || 'bg-gray-100 text-gray-700'}`}>
+                    {child.status}
+                  </span>
+                </div>
+                <h3 className="font-semibold text-lg">{child.first_name} {child.last_name}</h3>
+                <div className="space-y-1 mt-3 text-sm text-muted-foreground">
+                  <p className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5" /> Né(e) le: {child.dob}</p>
+                  <p className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> Parent: {child.parent_name}</p>
+                  <p>Genre: {child.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
                 </div>
               </div>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[child.status]}`}>{child.status}</span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">Aucun enfant trouvé. Commencez par en ajouter un !</p>
+            ))
           )}
         </div>
       )}
 
-      {/* --- MODALE DU FORMULAIRE D'AJOUT --- */}
+      {/* Modal / Popup d'ajout */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ajouter un nouveau dossier</DialogTitle>
+            <DialogTitle>Ajouter un nouvel enfant</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleAddChild} className="space-y-4 mt-4">
+          <form onSubmit={handleSubmit} className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="firstName">Prénom *</Label>
-                <Input 
-                  id="firstName" 
-                  required 
-                  value={formData.firstName}
-                  onChange={(e) => setFormData({...formData, firstName: e.target.value})}
-                />
+                <Label>Prénom *</Label>
+                <Input required value={formData.firstName} onChange={(e) => setFormData({...formData, firstName: e.target.value})} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="lastName">Nom *</Label>
-                <Input 
-                  id="lastName" 
-                  required 
-                  value={formData.lastName}
-                  onChange={(e) => setFormData({...formData, lastName: e.target.value})}
-                />
+                <Label>Nom *</Label>
+                <Input required value={formData.lastName} onChange={(e) => setFormData({...formData, lastName: e.target.value})} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="dob">Date de naissance *</Label>
-                <Input 
-                  id="dob" 
-                  type="date" 
-                  required 
-                  value={formData.dob}
-                  onChange={(e) => setFormData({...formData, dob: e.target.value})}
-                />
+                <Label>Date de naissance *</Label>
+                <Input type="date" required value={formData.dob} onChange={(e) => setFormData({...formData, dob: e.target.value})} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="gender">Genre</Label>
-                <Select 
-                  value={formData.gender} 
-                  onValueChange={(value) => setFormData({...formData, gender: value})}
-                >
-                  <SelectTrigger id="gender" className="w-full">
-                    <SelectValue placeholder="Choisir le genre" />
-                  </SelectTrigger>
+                <Label>Genre *</Label>
+                <Select value={formData.gender} onValueChange={(value) => setFormData({...formData, gender: value})}>
+                  <SelectTrigger><SelectValue placeholder="Choisir" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="M">Masculin</SelectItem>
                     <SelectItem value="F">Féminin</SelectItem>
@@ -249,22 +191,15 @@ const ChildrenModule: React.FC = () => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="parentName">Nom du parent / tuteur *</Label>
-              <Input 
-                id="parentName" 
-                required 
-                value={formData.parentName}
-                onChange={(e) => setFormData({...formData, parentName: e.target.value})}
-              />
+              <Label>Nom du parent / tuteur *</Label>
+              <Input required value={formData.parentName} onChange={(e) => setFormData({...formData, parentName: e.target.value})} />
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
-                Annuler
-              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Annuler</Button>
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {isSubmitting ? 'Enregistrement...' : 'Enregistrer'}
+                Enregistrer
               </Button>
             </div>
           </form>
