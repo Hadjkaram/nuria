@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -8,12 +9,10 @@ import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import {
-  BarChart3, Calendar, Download, Eye, ChevronRight, CheckCircle2, 
-  AlertTriangle, Clock, Activity, Brain, MessageCircle, Hand, Footprints, 
-  Users, Loader2, MapPin, User, Phone, Baby, FileText // <-- FileText ajouté ici !
+  BarChart3, Calendar, Download, ChevronRight, CheckCircle2, 
+  AlertTriangle, Activity, Users, Loader2, MapPin, User, Phone, Baby, FileText
 } from 'lucide-react';
 
-// Type correspondant exactement à la table 'screenings' de Supabase
 interface ScreeningData {
   id: string;
   child_name: string;
@@ -25,7 +24,8 @@ interface ScreeningData {
   score: number;
   risk_level: string;
   created_at: string;
-  responses: Record<string, boolean>; 
+  responses: Record<string, boolean>;
+  form_type?: string; 
 }
 
 const statusConfig: Record<string, any> = {
@@ -36,23 +36,30 @@ const statusConfig: Record<string, any> = {
 
 const ResultsModule: React.FC = () => {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const { toast } = useToast();
   
-  // --- États pour les vraies données ---
+  const isParent = user?.role === 'parent';
+  
   const [screenings, setScreenings] = useState<ScreeningData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // --- États pour la navigation ---
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
 
-  // 1. Récupération des données depuis Supabase
+  // 1. Récupération des données avec Filtre
   useEffect(() => {
     const fetchScreenings = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('screenings')
           .select('*')
           .order('created_at', { ascending: false });
+
+        // LE FILTRE EST ICI
+        if (isParent) {
+          query = query.eq('parent_id', user.id);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
         setScreenings(data || []);
@@ -68,9 +75,8 @@ const ResultsModule: React.FC = () => {
     };
 
     fetchScreenings();
-  }, [toast]);
+  }, [user, toast]);
 
-  // Utilitaires de conversion
   const calculateAge = (dobString: string) => {
     if (!dobString) return 'Âge inconnu';
     const dob = new Date(dobString);
@@ -82,38 +88,39 @@ const ResultsModule: React.FC = () => {
     return months > 0 ? `${years} ans ${months} mois` : `${years} ans`;
   };
 
-  const getStatusKey = (riskLevel: string) => {
-    if (riskLevel?.includes('Élevé')) return 'alert';
-    if (riskLevel?.includes('Moyen')) return 'warning';
-    return 'normal';
+  const getStatusKey = (riskLevel: string, score: number, isPnsm: boolean) => {
+    if (isPnsm) {
+      return score > 0 ? 'alert' : 'normal';
+    } else {
+      if (riskLevel?.includes('Élevé') || score >= 8) return 'alert';
+      if (riskLevel?.includes('Moyen') || score >= 3) return 'warning';
+      return 'normal';
+    }
   };
 
-  // --- STATISTIQUES GLOBALES ---
   const totalEvals = screenings.length;
-  const alertCount = screenings.filter(s => getStatusKey(s.risk_level) === 'alert').length;
-  const warningCount = screenings.filter(s => getStatusKey(s.risk_level) === 'warning').length;
+  const alertCount = screenings.filter(s => getStatusKey(s.risk_level, s.score, !!s.form_type?.includes('PNSM')) === 'alert').length;
+  const warningCount = screenings.filter(s => getStatusKey(s.risk_level, s.score, !!s.form_type?.includes('PNSM')) === 'warning').length;
   const normalCount = totalEvals - alertCount - warningCount;
 
-  // L'enfant actuellement sélectionné
   const selectedEval = screenings.find(s => s.id === selectedChildId);
 
-  // ---------------------------------------------------------------------------
-  // VUE 2 : DÉTAIL D'UNE ÉVALUATION
-  // ---------------------------------------------------------------------------
+  // VUE 2 : DÉTAIL
   if (selectedEval) {
-    const statusKey = getStatusKey(selectedEval.risk_level);
+    const isPnsm = !!selectedEval.form_type?.includes('PNSM');
+    const statusKey = getStatusKey(selectedEval.risk_level, selectedEval.score, isPnsm);
     const sc = statusConfig[statusKey];
     const StatusIcon = sc.icon;
-    const scorePercentage = (selectedEval.score / 20) * 100;
+    const maxScore = isPnsm ? 20 : 20;
+    const scorePercentage = (selectedEval.score / maxScore) * 100;
 
     return (
       <DashboardLayout>
         <div className="max-w-4xl mx-auto">
           <Button variant="ghost" className="mb-4 hover:bg-slate-200" onClick={() => setSelectedChildId(null)}>
-            ← Retour à la liste des dépistages
+            ← {isParent ? 'Retour à mes enfants' : 'Retour à la liste des dépistages'}
           </Button>
 
-          {/* Header du dossier */}
           <div className="flex items-center gap-4 mb-6 bg-white p-6 rounded-2xl shadow-sm border">
             <div className={`h-16 w-16 rounded-full flex items-center justify-center font-black text-2xl ${sc.bg} ${sc.color}`}>
               {selectedEval.child_name.charAt(0).toUpperCase()}
@@ -131,32 +138,38 @@ const ResultsModule: React.FC = () => {
                 <StatusIcon className="h-5 w-5" />
                 {selectedEval.risk_level.toUpperCase()}
               </div>
-              <span className={`text-xs font-bold mt-1 ${sc.color}`}>M-CHAT-R</span>
+              <span className={`text-xs font-bold mt-1 ${sc.color}`}>{selectedEval.form_type || 'M-CHAT-R'}</span>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            {/* Colonne de gauche : Score et Recommandations */}
             <div className="md:col-span-2 space-y-6">
-              <Card className="border-t-4 border-t-primary shadow-md">
+              <Card className={`border-t-4 shadow-md ${statusKey === 'alert' ? 'border-t-red-500' : statusKey === 'warning' ? 'border-t-amber-500' : 'border-t-emerald-500'}`}>
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Score M-CHAT-R</span>
-                    <span className={`text-3xl font-black ${sc.color}`}>{selectedEval.score}<span className="text-xl text-slate-300">/20</span></span>
+                    <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">Score Obtenu</span>
+                    <span className={`text-3xl font-black ${sc.color}`}>{selectedEval.score}<span className="text-xl text-slate-300">/{maxScore}</span></span>
                   </div>
-                  <Progress value={scorePercentage} className="h-3" />
-                  <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
-                    <span>Faible (0-2)</span>
-                    <span>Moyen (3-7)</span>
-                    <span>Élevé (8-20)</span>
-                  </div>
+                  <Progress value={scorePercentage} className="h-3 mb-2" />
+                  {!isPnsm ? (
+                    <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+                      <span>Faible (0-2)</span>
+                      <span>Moyen (3-7)</span>
+                      <span>Élevé (8-20)</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+                      <span>Normal (0 Non)</span>
+                      <span>Risque (≥1 Non)</span>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
               <Card className="shadow-md">
                 <CardHeader className="bg-slate-50 border-b pb-4">
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-primary" /> Recommandations cliniques
+                    <Activity className="h-5 w-5 text-primary" /> {isParent ? 'Nos Recommandations' : 'Recommandations cliniques'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6 space-y-4">
@@ -169,50 +182,51 @@ const ResultsModule: React.FC = () => {
                   {statusKey === 'warning' && (
                     <div className="flex items-start gap-3 bg-amber-50 p-4 rounded-xl border border-amber-100">
                       <AlertTriangle className="h-6 w-6 text-amber-600 shrink-0" />
-                      <p className="text-sm font-medium text-amber-800">Une évaluation détaillée de suivi (M-CHAT-R/F) ou une consultation avec un spécialiste est recommandée pour approfondir les observations.</p>
+                      <p className="text-sm font-medium text-amber-800">Une évaluation détaillée de suivi ou une consultation avec un spécialiste est recommandée pour approfondir les observations.</p>
                     </div>
                   )}
                   {statusKey === 'alert' && (
                     <div className="flex items-start gap-3 bg-red-50 p-4 rounded-xl border border-red-100">
                       <AlertTriangle className="h-6 w-6 text-red-600 shrink-0" />
-                      <p className="text-sm font-medium text-red-800">Une orientation urgente vers un spécialiste du neurodéveloppement (pédopsychiatre, neuropédiatre) pour une évaluation diagnostique complète est fortement recommandée.</p>
+                      <p className="text-sm font-medium text-red-800">Une orientation vers un spécialiste du neurodéveloppement pour une évaluation complète est fortement recommandée.</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
             </div>
 
-            {/* Colonne de droite : Infos Contacts */}
             <div className="space-y-6">
-              <Card className="shadow-md">
-                <CardHeader className="bg-slate-50 border-b pb-4">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" /> Contacts
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-5 space-y-4">
-                  <div>
-                    <span className="text-xs font-bold text-slate-400 uppercase">Parent / Tuteur</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <User className="h-4 w-4 text-slate-400" />
-                      <span className="font-semibold text-slate-700">{selectedEval.parent_name || 'Non renseigné'}</span>
+              {!isParent && (
+                <Card className="shadow-md">
+                  <CardHeader className="bg-slate-50 border-b pb-4">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="h-5 w-5 text-primary" /> Contacts
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-5 space-y-4">
+                    <div>
+                      <span className="text-xs font-bold text-slate-400 uppercase">Parent / Tuteur</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <User className="h-4 w-4 text-slate-400" />
+                        <span className="font-semibold text-slate-700">{selectedEval.parent_name || 'Non renseigné'}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-400 uppercase">Téléphone</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Phone className="h-4 w-4 text-slate-400" />
-                      <span className="font-semibold text-slate-700">{selectedEval.parent_contact || 'Non renseigné'}</span>
+                    <div>
+                      <span className="text-xs font-bold text-slate-400 uppercase">Téléphone</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Phone className="h-4 w-4 text-slate-400" />
+                        <span className="font-semibold text-slate-700">{selectedEval.parent_contact || 'Non renseigné'}</span>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="flex flex-col gap-3">
                 <Button className="w-full gap-2 shadow-md"><Download className="h-4 w-4" /> Télécharger le rapport</Button>
                 {statusKey !== 'normal' && (
                   <Button variant="outline" className="w-full gap-2 border-primary text-primary">
-                    <FileText className="h-4 w-4" /> Orienter vers un médecin
+                    <FileText className="h-4 w-4" /> {isParent ? 'Demander une téléconsultation' : 'Orienter vers un médecin'}
                   </Button>
                 )}
               </div>
@@ -223,65 +237,66 @@ const ResultsModule: React.FC = () => {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // VUE 1 : VUE PRINCIPALE (Liste des dépistages et statistiques)
-  // ---------------------------------------------------------------------------
+  // VUE 1 : LISTE
   return (
     <DashboardLayout>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Résultats & Dépistages (M-CHAT-R)</h1>
+        <h1 className="text-2xl font-bold">{isParent ? 'Résultats de mes enfants' : 'Résultats & Dépistages'}</h1>
       </div>
 
-      {/* Cartes de Statistiques */}
-      <div className="grid gap-4 md:grid-cols-4 mb-8">
-        {[
-          { label: 'Total dépistages', value: totalEvals, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-100' },
-          { label: 'Risque Élevé', value: alertCount, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100' },
-          { label: 'Risque Moyen', value: warningCount, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100' },
-          { label: 'Risque Faible', value: normalCount, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-        ].map((s, idx) => (
-          <Card key={idx} className="shadow-sm">
-            <CardContent className="p-5 flex items-center gap-4">
-              <div className={`h-12 w-12 rounded-xl ${s.bg} flex items-center justify-center`}>
-                <s.icon className={`h-6 w-6 ${s.color}`} />
-              </div>
-              <div>
-                <p className="text-2xl font-black text-slate-800">{isLoading ? '-' : s.value}</p>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{s.label}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {!isParent && (
+        <div className="grid gap-4 md:grid-cols-4 mb-8">
+          {[
+            { label: 'Total dépistages', value: totalEvals, icon: BarChart3, color: 'text-blue-600', bg: 'bg-blue-100' },
+            { label: 'Risque Élevé (TND)', value: alertCount, icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-100' },
+            { label: 'Risque Moyen', value: warningCount, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-100' },
+            { label: 'Développement Normal', value: normalCount, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100' },
+          ].map((s, idx) => (
+            <Card key={idx} className="shadow-sm">
+              <CardContent className="p-5 flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-xl ${s.bg} flex items-center justify-center`}>
+                  <s.icon className={`h-6 w-6 ${s.color}`} />
+                </div>
+                <div>
+                  <p className="text-2xl font-black text-slate-800">{isLoading ? '-' : s.value}</p>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">{s.label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {/* Liste des enfants */}
       <Tabs defaultValue="all" className="w-full">
         <TabsList className="mb-6 bg-slate-200/50 p-1">
-          <TabsTrigger value="all" className="font-bold">Tous les enfants</TabsTrigger>
+          <TabsTrigger value="all" className="font-bold">{isParent ? 'Tous mes enfants' : 'Tous les enfants'}</TabsTrigger>
           <TabsTrigger value="alert" className="font-bold text-red-600 data-[state=active]:bg-red-100">Risque Élevé</TabsTrigger>
           <TabsTrigger value="warning" className="font-bold text-amber-600 data-[state=active]:bg-amber-100">Risque Moyen</TabsTrigger>
-          <TabsTrigger value="normal" className="font-bold text-emerald-600 data-[state=active]:bg-emerald-100">Risque Faible</TabsTrigger>
+          <TabsTrigger value="normal" className="font-bold text-emerald-600 data-[state=active]:bg-emerald-100">Risque Faible / Normal</TabsTrigger>
         </TabsList>
 
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20">
             <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
-            <p className="text-slate-500 font-medium">Chargement des dossiers depuis Supabase...</p>
+            <p className="text-slate-500 font-medium">Chargement des dossiers...</p>
           </div>
         ) : screenings.length === 0 ? (
            <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed shadow-sm">
              <Baby className="h-16 w-16 mx-auto text-slate-300 mb-4" />
              <h3 className="text-xl font-bold text-slate-700">Aucun résultat</h3>
-             <p className="text-slate-500 mt-2">Aucun enfant n'a encore été recensé sur le terrain.</p>
+             <p className="text-slate-500 mt-2">
+               {isParent ? "Vous n'avez pas encore d'enfant évalué." : "Aucun enfant n'a encore été recensé sur le terrain."}
+             </p>
            </div>
         ) : (
           ['all', 'alert', 'warning', 'normal'].map(tab => (
             <TabsContent key={tab} value={tab} className="mt-0">
               <div className="grid gap-3">
                 {screenings
-                  .filter(c => tab === 'all' || getStatusKey(c.risk_level) === tab)
+                  .filter(c => tab === 'all' || getStatusKey(c.risk_level, c.score, !!c.form_type?.includes('PNSM')) === tab)
                   .map(c => {
-                    const statusKey = getStatusKey(c.risk_level);
+                    const isPnsm = !!c.form_type?.includes('PNSM');
+                    const statusKey = getStatusKey(c.risk_level, c.score, isPnsm);
                     const sc = statusConfig[statusKey];
                     const StatusIcon = sc.icon;
 
@@ -295,20 +310,17 @@ const ResultsModule: React.FC = () => {
                         onClick={() => setSelectedChildId(c.id)}
                       >
                         <CardContent className="p-4 flex items-center gap-5">
-                          {/* Avatar Prénom */}
                           <div className={`h-12 w-12 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${sc.bg} ${sc.color}`}>
                             {c.child_name.charAt(0).toUpperCase()}
                           </div>
                           
-                          {/* Infos Patient */}
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-lg text-slate-800 truncate">{c.child_name}</p>
                             <p className="text-sm font-medium text-slate-500 flex items-center gap-2">
-                              {calculateAge(c.dob)} · M-CHAT-R ({new Date(c.created_at).toLocaleDateString('fr-FR')})
+                              {calculateAge(c.dob)} · {c.form_type || 'M-CHAT-R'} ({new Date(c.created_at).toLocaleDateString('fr-FR')})
                             </p>
                           </div>
 
-                          {/* Badge Score/Risque */}
                           <div className="text-right mr-4">
                             <div className={`flex items-center gap-1.5 justify-end px-3 py-1 rounded-full border ${sc.bg} border-${sc.color.split('-')[1]}-200`}>
                               <StatusIcon className={`h-4 w-4 ${sc.color}`} />

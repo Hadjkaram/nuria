@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import type { Lang } from '@/i18n/translations';
@@ -15,9 +15,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import {
   Globe, Plus, Search, MapPin, Users, Building, Activity, Settings,
   MoreVertical, Eye, Edit, Trash2, CheckCircle, Clock, XCircle,
-  TrendingUp, Baby, Stethoscope, Flag, ArrowUpRight,
+  TrendingUp, Baby, Stethoscope, Flag, ArrowUpRight, Loader2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT : Supabase
 
 const tt = (map: Record<Lang, string>, lang: Lang) => map[lang] || map.fr;
 
@@ -38,16 +39,6 @@ interface Country {
   contact: string;
 }
 
-const initialCountries: Country[] = [
-  { id: '1', name: { fr: "Côte d'Ivoire", en: "Ivory Coast", pt: "Costa do Marfim", ar: "ساحل العاج" }, code: 'CI', flag: '🇨🇮', status: 'active', regions: 14, structures: 138, professionals: 320, children: 12450, coverage: 62, launchDate: '2024-01-15', language: 'Français', currency: 'XOF', contact: 'Dr. Konan Yao' },
-  { id: '2', name: { fr: 'Sénégal', en: 'Senegal', pt: 'Senegal', ar: 'السنغال' }, code: 'SN', flag: '🇸🇳', status: 'active', regions: 11, structures: 95, professionals: 210, children: 8200, coverage: 55, launchDate: '2024-06-01', language: 'Français', currency: 'XOF', contact: 'Dr. Aminata Diop' },
-  { id: '3', name: { fr: 'Maroc', en: 'Morocco', pt: 'Marrocos', ar: 'المغرب' }, code: 'MA', flag: '🇲🇦', status: 'pilot', regions: 5, structures: 42, professionals: 85, children: 3100, coverage: 38, launchDate: '2025-03-01', language: 'Français / Arabe', currency: 'MAD', contact: 'Dr. Fatima Bennani' },
-  { id: '4', name: { fr: 'Cameroun', en: 'Cameroon', pt: 'Camarões', ar: 'الكاميرون' }, code: 'CM', flag: '🇨🇲', status: 'pilot', regions: 4, structures: 28, professionals: 52, children: 1850, coverage: 25, launchDate: '2025-09-01', language: 'Français / Anglais', currency: 'XAF', contact: 'Dr. Paul Mbarga' },
-  { id: '5', name: { fr: 'Tunisie', en: 'Tunisia', pt: 'Tunísia', ar: 'تونس' }, code: 'TN', flag: '🇹🇳', status: 'pending', regions: 0, structures: 0, professionals: 0, children: 0, coverage: 0, launchDate: '', language: 'Français / Arabe', currency: 'TND', contact: 'Dr. Hichem Bouzid' },
-  { id: '6', name: { fr: 'Rwanda', en: 'Rwanda', pt: 'Ruanda', ar: 'رواندا' }, code: 'RW', flag: '🇷🇼', status: 'pending', regions: 0, structures: 0, professionals: 0, children: 0, coverage: 0, launchDate: '', language: 'Anglais / Français', currency: 'RWF', contact: 'Dr. Grace Uwimana' },
-  { id: '7', name: { fr: 'Mali', en: 'Mali', pt: 'Mali', ar: 'مالي' }, code: 'ML', flag: '🇲🇱', status: 'inactive', regions: 0, structures: 0, professionals: 0, children: 0, coverage: 0, launchDate: '', language: 'Français', currency: 'XOF', contact: '' },
-];
-
 const statusConfig = {
   active: { label: { fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, variant: 'default' as const, icon: CheckCircle },
   pilot: { label: { fr: 'Pilote', en: 'Pilot', pt: 'Piloto', ar: 'تجريبي' }, variant: 'secondary' as const, icon: Activity },
@@ -58,13 +49,58 @@ const statusConfig = {
 const CountriesModule: React.FC = () => {
   const { lang } = useLanguage();
   const { toast } = useToast();
-  const [countries, setCountries] = useState<Country[]>(initialCountries);
+  
+  const [countries, setCountries] = useState<Country[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('list');
   const [newCountry, setNewCountry] = useState({ name: '', code: '', language: '', currency: '', contact: '' });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchCountries = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('countries')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        const formatted: Country[] = data.map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          code: d.code,
+          flag: d.flag || '🏳️',
+          status: d.status,
+          regions: d.regions || 0,
+          structures: d.structures || 0,
+          professionals: d.professionals || 0,
+          children: d.children || 0,
+          coverage: d.coverage || 0,
+          launchDate: d.launch_date || '',
+          language: d.language || '',
+          currency: d.currency || '',
+          contact: d.contact || ''
+        }));
+        setCountries(formatted);
+      }
+    } catch (error: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les pays", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCountries();
+  }, []);
 
   const labels = {
     title: { fr: 'Gestion des pays', en: 'Country Management', pt: 'Gestão de países', ar: 'إدارة الدول' },
@@ -122,33 +158,62 @@ const CountriesModule: React.FC = () => {
   const childrenChart = countries.filter(c => c.children > 0).map(c => ({ name: `${c.flag} ${tt(c.name, lang)}`, children: c.children })).sort((a, b) => b.children - a.children);
   const coverageChart = countries.filter(c => c.coverage > 0).map(c => ({ name: `${c.flag} ${tt(c.name, lang)}`, coverage: c.coverage })).sort((a, b) => b.coverage - a.coverage);
 
-  const handleCreate = () => {
+  // --- 2. CRÉATION ---
+  const handleCreate = async () => {
     if (!newCountry.name || !newCountry.code) return;
-    const country: Country = {
-      id: Date.now().toString(),
-      name: { fr: newCountry.name, en: newCountry.name, pt: newCountry.name, ar: newCountry.name },
-      code: newCountry.code.toUpperCase(),
-      flag: '🏳️',
-      status: 'pending',
-      regions: 0, structures: 0, professionals: 0, children: 0, coverage: 0,
-      launchDate: '', language: newCountry.language, currency: newCountry.currency, contact: newCountry.contact,
-    };
-    setCountries(prev => [...prev, country]);
-    setShowCreateDialog(false);
-    setNewCountry({ name: '', code: '', language: '', currency: '', contact: '' });
-    toast({ title: tt({ fr: 'Pays ajouté', en: 'Country added', pt: 'País adicionado', ar: 'تمت إضافة الدولة' }, lang) });
+    setIsSubmitting(true);
+    
+    try {
+      const dbPayload = {
+        name: { fr: newCountry.name, en: newCountry.name, pt: newCountry.name, ar: newCountry.name },
+        code: newCountry.code.toUpperCase(),
+        flag: '🏳️',
+        status: 'pending',
+        language: newCountry.language,
+        currency: newCountry.currency,
+        contact: newCountry.contact,
+      };
+
+      const { error } = await supabase.from('countries').insert([dbPayload]);
+      if (error) throw error;
+
+      setShowCreateDialog(false);
+      setNewCountry({ name: '', code: '', language: '', currency: '', contact: '' });
+      toast({ title: tt({ fr: 'Pays ajouté', en: 'Country added', pt: 'País adicionado', ar: 'تمت إضافة الدولة' }, lang) });
+      fetchCountries();
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleStatusChange = (id: string, newStatus: Country['status']) => {
-    setCountries(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
-    if (selectedCountry?.id === id) setSelectedCountry(prev => prev ? { ...prev, status: newStatus } : null);
-    toast({ title: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
+  // --- 3. MISE À JOUR DU STATUT ---
+  const handleStatusChange = async (id: string, newStatus: Country['status']) => {
+    try {
+      const { error } = await supabase.from('countries').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
+
+      setCountries(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
+      if (selectedCountry?.id === id) setSelectedCountry(prev => prev ? { ...prev, status: newStatus } : null);
+      toast({ title: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setCountries(prev => prev.filter(c => c.id !== id));
-    if (selectedCountry?.id === id) setSelectedCountry(null);
-    toast({ title: tt({ fr: 'Pays supprimé', en: 'Country deleted', pt: 'País excluído', ar: 'تم حذف الدولة' }, lang) });
+  // --- 4. SUPPRESSION ---
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('countries').delete().eq('id', id);
+      if (error) throw error;
+
+      setCountries(prev => prev.filter(c => c.id !== id));
+      if (selectedCountry?.id === id) setSelectedCountry(null);
+      toast({ title: tt({ fr: 'Pays supprimé', en: 'Country deleted', pt: 'País excluído', ar: 'تم حذف الدولة' }, lang) });
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -214,153 +279,162 @@ const CountriesModule: React.FC = () => {
               </Select>
             </div>
 
-            <div className="flex gap-6">
-              {/* Country list */}
-              <div className={`space-y-3 ${selectedCountry ? 'w-1/2' : 'w-full'} transition-all`}>
-                {filtered.map(country => {
-                  const cfg = statusConfig[country.status];
-                  const StatusIcon = cfg.icon;
-                  const isSelected = selectedCountry?.id === country.id;
-                  return (
-                    <Card key={country.id} className={`cursor-pointer transition-all hover:border-primary/30 ${isSelected ? 'border-primary ring-1 ring-primary/20' : ''}`} onClick={() => setSelectedCountry(country)}>
-                      <CardContent className="py-4">
-                        <div className="flex items-center gap-4">
-                          <span className="text-3xl">{country.flag}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-semibold text-sm">{tt(country.name, lang)}</span>
-                              <Badge variant="outline" className="text-[10px]">{country.code}</Badge>
-                              <Badge variant={cfg.variant} className="gap-1 text-[10px]">
-                                <StatusIcon className="h-3 w-3" />{tt(cfg.label, lang)}
-                              </Badge>
-                            </div>
-                            {country.status === 'active' || country.status === 'pilot' ? (
-                              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{country.regions} {tt(labels.regions, lang)}</span>
-                                <span className="flex items-center gap-1"><Building className="h-3 w-3" />{country.structures}</span>
-                                <span className="flex items-center gap-1"><Users className="h-3 w-3" />{country.children.toLocaleString()}</span>
-                                <span className="flex items-center gap-1"><TrendingUp className="h-3 w-3" />{country.coverage}%</span>
+            {isLoading ? (
+              <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            ) : (
+              <div className="flex gap-6">
+                {/* Country list */}
+                <div className={`space-y-3 ${selectedCountry ? 'w-1/2' : 'w-full'} transition-all`}>
+                  {filtered.length === 0 ? (
+                    <div className="text-center py-10 bg-card border rounded-xl">
+                      <Globe className="h-10 w-10 mx-auto text-muted-foreground opacity-20 mb-3" />
+                      <p className="text-muted-foreground">Aucun pays trouvé.</p>
+                    </div>
+                  ) : filtered.map(country => {
+                    const cfg = statusConfig[country.status];
+                    const StatusIcon = cfg.icon;
+                    const isSelected = selectedCountry?.id === country.id;
+                    return (
+                      <Card key={country.id} className={`cursor-pointer transition-all hover:border-primary/30 ${isSelected ? 'border-primary ring-1 ring-primary/20' : ''}`} onClick={() => setSelectedCountry(country)}>
+                        <CardContent className="py-4">
+                          <div className="flex items-center gap-4">
+                            <span className="text-3xl">{country.flag}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-semibold text-sm">{tt(country.name, lang)}</span>
+                                <Badge variant="outline" className="text-[10px]">{country.code}</Badge>
+                                <Badge variant={cfg.variant} className="gap-1 text-[10px]">
+                                  <StatusIcon className="h-3 w-3" />{tt(cfg.label, lang)}
+                                </Badge>
                               </div>
-                            ) : (
-                              <div className="text-xs text-muted-foreground">{country.contact || tt(labels.notLaunched, lang)}</div>
+                              {country.status === 'active' || country.status === 'pilot' ? (
+                                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{country.regions} {tt(labels.regions, lang)}</span>
+                                  <span className="flex items-center gap-1"><Building className="h-3 w-3" />{country.structures}</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" />{country.children.toLocaleString()}</span>
+                                  <span className="flex items-center gap-1"><TrendingUp className="h-3 w-3" />{country.coverage}%</span>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground">{country.contact || tt(labels.notLaunched, lang)}</div>
+                              )}
+                            </div>
+                            {(country.status === 'active' || country.status === 'pilot') && (
+                              <div className="w-16 shrink-0">
+                                <div className="text-xs text-right text-muted-foreground mb-1">{country.coverage}%</div>
+                                <Progress value={country.coverage} className="h-1.5" />
+                              </div>
                             )}
                           </div>
-                          {(country.status === 'active' || country.status === 'pilot') && (
-                            <div className="w-16 shrink-0">
-                              <div className="text-xs text-right text-muted-foreground mb-1">{country.coverage}%</div>
-                              <Progress value={country.coverage} className="h-1.5" />
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                {/* Detail panel */}
+                {selectedCountry && (
+                  <div className="w-1/2 space-y-4">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-4xl">{selectedCountry.flag}</span>
+                            <div>
+                              <CardTitle className="text-lg">{tt(selectedCountry.name, lang)}</CardTitle>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline">{selectedCountry.code}</Badge>
+                                <Badge variant={statusConfig[selectedCountry.status].variant}>{tt(statusConfig[selectedCountry.status].label, lang)}</Badge>
+                              </div>
                             </div>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => setSelectedCountry(null)}>
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="bg-muted/30 rounded-lg p-3">
+                            <div className="text-muted-foreground text-xs">{tt(labels.language, lang)}</div>
+                            <div className="font-medium mt-0.5">{selectedCountry.language || '—'}</div>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3">
+                            <div className="text-muted-foreground text-xs">{tt(labels.currency, lang)}</div>
+                            <div className="font-medium mt-0.5">{selectedCountry.currency || '—'}</div>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3">
+                            <div className="text-muted-foreground text-xs">{tt(labels.contact, lang)}</div>
+                            <div className="font-medium mt-0.5">{selectedCountry.contact || '—'}</div>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3">
+                            <div className="text-muted-foreground text-xs">{tt(labels.launchDate, lang)}</div>
+                            <div className="font-medium mt-0.5">{selectedCountry.launchDate || '—'}</div>
+                          </div>
+                        </div>
+
+                        {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
+                          <div className="grid grid-cols-2 gap-3">
+                            {[
+                              { label: labels.regions, value: selectedCountry.regions, icon: MapPin },
+                              { label: labels.structures, value: selectedCountry.structures, icon: Building },
+                              { label: labels.professionals, value: selectedCountry.professionals, icon: Users },
+                              { label: labels.children, value: selectedCountry.children.toLocaleString(), icon: Baby },
+                            ].map((stat, i) => {
+                              const Icon = stat.icon;
+                              return (
+                                <div key={i} className="flex items-center gap-2 p-3 rounded-lg border border-border">
+                                  <Icon className="h-4 w-4 text-primary" />
+                                  <div>
+                                    <div className="font-bold text-sm">{stat.value}</div>
+                                    <div className="text-[10px] text-muted-foreground">{tt(stat.label, lang)}</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
+                          <div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-muted-foreground">{tt(labels.coverage, lang)}</span>
+                              <span className="font-medium">{selectedCountry.coverage}%</span>
+                            </div>
+                            <Progress value={selectedCountry.coverage} className="h-2.5" />
+                          </div>
+                        )}
+
+                        <div className="flex gap-2 pt-2">
+                          {selectedCountry.status === 'pending' && (
+                            <Button size="sm" onClick={() => handleStatusChange(selectedCountry.id, 'pilot')} className="gap-1">
+                              <Activity className="h-3.5 w-3.5" />{tt({ fr: 'Lancer en pilote', en: 'Launch pilot', pt: 'Lançar piloto', ar: 'إطلاق تجريبي' }, lang)}
+                            </Button>
                           )}
+                          {selectedCountry.status === 'pilot' && (
+                            <Button size="sm" onClick={() => handleStatusChange(selectedCountry.id, 'active')} className="gap-1">
+                              <CheckCircle className="h-3.5 w-3.5" />{tt(labels.activate, lang)}
+                            </Button>
+                          )}
+                          {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
+                            <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedCountry.id, 'inactive')} className="gap-1">
+                              <XCircle className="h-3.5 w-3.5" />{tt(labels.deactivate, lang)}
+                            </Button>
+                          )}
+                          {selectedCountry.status === 'inactive' && (
+                            <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedCountry.id, 'pending')} className="gap-1">
+                              <Clock className="h-3.5 w-3.5" />{tt({ fr: 'Réactiver', en: 'Reactivate', pt: 'Reativar', ar: 'إعادة التفعيل' }, lang)}
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => handleDelete(selectedCountry.id)} className="text-destructive gap-1">
+                            <Trash2 className="h-3.5 w-3.5" />{tt(labels.delete, lang)}
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
-                  );
-                })}
+                  </div>
+                )}
               </div>
-
-              {/* Detail panel */}
-              {selectedCountry && (
-                <div className="w-1/2 space-y-4">
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="text-4xl">{selectedCountry.flag}</span>
-                          <div>
-                            <CardTitle className="text-lg">{tt(selectedCountry.name, lang)}</CardTitle>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Badge variant="outline">{selectedCountry.code}</Badge>
-                              <Badge variant={statusConfig[selectedCountry.status].variant}>{tt(statusConfig[selectedCountry.status].label, lang)}</Badge>
-                            </div>
-                          </div>
-                        </div>
-                        <Button variant="ghost" size="icon" onClick={() => setSelectedCountry(null)}>
-                          <XCircle className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div className="bg-muted/30 rounded-lg p-3">
-                          <div className="text-muted-foreground text-xs">{tt(labels.language, lang)}</div>
-                          <div className="font-medium mt-0.5">{selectedCountry.language}</div>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3">
-                          <div className="text-muted-foreground text-xs">{tt(labels.currency, lang)}</div>
-                          <div className="font-medium mt-0.5">{selectedCountry.currency}</div>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3">
-                          <div className="text-muted-foreground text-xs">{tt(labels.contact, lang)}</div>
-                          <div className="font-medium mt-0.5">{selectedCountry.contact || '—'}</div>
-                        </div>
-                        <div className="bg-muted/30 rounded-lg p-3">
-                          <div className="text-muted-foreground text-xs">{tt(labels.launchDate, lang)}</div>
-                          <div className="font-medium mt-0.5">{selectedCountry.launchDate || '—'}</div>
-                        </div>
-                      </div>
-
-                      {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
-                        <div className="grid grid-cols-2 gap-3">
-                          {[
-                            { label: labels.regions, value: selectedCountry.regions, icon: MapPin },
-                            { label: labels.structures, value: selectedCountry.structures, icon: Building },
-                            { label: labels.professionals, value: selectedCountry.professionals, icon: Users },
-                            { label: labels.children, value: selectedCountry.children.toLocaleString(), icon: Baby },
-                          ].map((stat, i) => {
-                            const Icon = stat.icon;
-                            return (
-                              <div key={i} className="flex items-center gap-2 p-3 rounded-lg border border-border">
-                                <Icon className="h-4 w-4 text-primary" />
-                                <div>
-                                  <div className="font-bold text-sm">{stat.value}</div>
-                                  <div className="text-[10px] text-muted-foreground">{tt(stat.label, lang)}</div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
-                        <div>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-muted-foreground">{tt(labels.coverage, lang)}</span>
-                            <span className="font-medium">{selectedCountry.coverage}%</span>
-                          </div>
-                          <Progress value={selectedCountry.coverage} className="h-2.5" />
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 pt-2">
-                        {selectedCountry.status === 'pending' && (
-                          <Button size="sm" onClick={() => handleStatusChange(selectedCountry.id, 'pilot')} className="gap-1">
-                            <Activity className="h-3.5 w-3.5" />{tt({ fr: 'Lancer en pilote', en: 'Launch pilot', pt: 'Lançar piloto', ar: 'إطلاق تجريبي' }, lang)}
-                          </Button>
-                        )}
-                        {selectedCountry.status === 'pilot' && (
-                          <Button size="sm" onClick={() => handleStatusChange(selectedCountry.id, 'active')} className="gap-1">
-                            <CheckCircle className="h-3.5 w-3.5" />{tt(labels.activate, lang)}
-                          </Button>
-                        )}
-                        {(selectedCountry.status === 'active' || selectedCountry.status === 'pilot') && (
-                          <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedCountry.id, 'inactive')} className="gap-1">
-                            <XCircle className="h-3.5 w-3.5" />{tt(labels.deactivate, lang)}
-                          </Button>
-                        )}
-                        {selectedCountry.status === 'inactive' && (
-                          <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedCountry.id, 'pending')} className="gap-1">
-                            <Clock className="h-3.5 w-3.5" />{tt({ fr: 'Réactiver', en: 'Reactivate', pt: 'Reativar', ar: 'إعادة التفعيل' }, lang)}
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => handleDelete(selectedCountry.id)} className="text-destructive gap-1">
-                          <Trash2 className="h-3.5 w-3.5" />{tt(labels.delete, lang)}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
+            )}
           </TabsContent>
 
           {/* ANALYTICS */}
@@ -437,7 +511,10 @@ const CountriesModule: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>{tt(labels.cancel, lang)}</Button>
-            <Button onClick={handleCreate}>{tt(labels.save, lang)}</Button>
+            <Button onClick={handleCreate} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {tt(labels.save, lang)}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

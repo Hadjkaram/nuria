@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth, type UserRole } from '@/contexts/AuthContext';
@@ -6,15 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import {
   Users, Search, Plus, Shield, UserCheck, UserX, Mail, Phone,
   Calendar, Filter, Edit, Trash2, MoreVertical, CheckCircle2,
-  Clock, AlertCircle, Building, Activity, Eye, Lock, Unlock
+  Clock, AlertCircle, Building, Activity, Eye, Lock, Unlock, Loader2, UserPlus
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 
 type UserStatus = 'all' | 'active' | 'inactive' | 'pending' | 'suspended';
 
@@ -61,30 +62,130 @@ const statusConfig: Record<string, { label: Record<string, string>; style: strin
   suspended: { label: { fr: 'Suspendu', en: 'Suspended', pt: 'Suspenso', ar: 'معلق' }, style: 'bg-red-100 text-red-800', icon: AlertCircle },
 };
 
-const mockUsers: ManagedUser[] = [
-  { id: '1', firstName: 'Dr. Jean', lastName: 'Mbeki', email: 'pro@nuria.app', phone: '+225 07 11 22 33', role: 'professional', status: 'active', organization: 'Centre de santé Abobo', lastLogin: '2026-03-10', createdAt: '2025-06-15', isOnline: true },
-  { id: '2', firstName: 'Fatou', lastName: 'Diallo', email: 'teacher@nuria.app', phone: '+225 05 44 55 66', role: 'teacher', status: 'active', organization: 'École primaire Cocody', lastLogin: '2026-03-09', createdAt: '2025-08-20', isOnline: false },
-  { id: '3', firstName: 'Moussa', lastName: 'Traoré', email: 'community@nuria.app', phone: '+225 01 77 88 99', role: 'community', status: 'active', organization: 'ONG Santé Plus', lastLogin: '2026-03-10', createdAt: '2025-09-01', isOnline: true },
-  { id: '4', firstName: 'Aminata', lastName: 'Koné', email: 'parent@nuria.app', phone: '+225 07 12 34 56', role: 'parent', status: 'active', organization: '-', lastLogin: '2026-03-08', createdAt: '2025-11-10', isOnline: false },
-  { id: '5', firstName: 'Mariam', lastName: 'Cissé', email: 'mariam@nuria.app', phone: '+225 05 22 33 44', role: 'professional', status: 'pending', organization: 'Hôpital Cocody', lastLogin: '-', createdAt: '2026-03-05', isOnline: false },
-  { id: '6', firstName: 'Kouadio', lastName: 'Assi', email: 'kouadio@nuria.app', phone: '+225 07 55 66 77', role: 'teacher', status: 'inactive', organization: 'Lycée Yopougon', lastLogin: '2026-01-15', createdAt: '2025-07-10', isOnline: false },
-  { id: '7', firstName: 'Aïcha', lastName: 'Sow', email: 'aicha@nuria.app', phone: '+225 01 88 99 00', role: 'community', status: 'active', organization: 'ONG Santé Plus', lastLogin: '2026-03-10', createdAt: '2025-10-15', isOnline: true },
-  { id: '8', firstName: 'Bakary', lastName: 'Sanogo', email: 'bakary@nuria.app', phone: '+225 05 11 00 99', role: 'professional', status: 'suspended', organization: 'Centre de santé Abobo', lastLogin: '2026-02-20', createdAt: '2025-05-01', isOnline: false },
-  { id: '9', firstName: 'Ibrahim', lastName: 'Coulibaly', email: 'program@nuria.app', phone: '+225 07 33 22 11', role: 'program', status: 'active', organization: 'Ministère de la Santé', lastLogin: '2026-03-09', createdAt: '2025-04-01', isOnline: false },
-  { id: '10', firstName: 'Rokia', lastName: 'Bamba', email: 'rokia@nuria.app', phone: '+225 01 44 55 66', role: 'parent', status: 'active', organization: '-', lastLogin: '2026-03-07', createdAt: '2026-01-20', isOnline: false },
-];
-
 const UsersModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { toast } = useToast();
   const { user: currentUser } = useAuth();
+  
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<UserStatus>('all');
-  const [users, setUsers] = useState<ManagedUser[]>(mockUsers);
   const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showEdit, setShowEdit] = useState(false);
-  const [newUser, setNewUser] = useState({ firstName: '', lastName: '', email: '', phone: '', role: 'professional' as UserRole, organization: '' });
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  
+  // États pour l'invitation
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteForm, setInviteForm] = useState({
+    email: '', firstName: '', lastName: '', role: '', organization: ''
+  });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchUsers = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        setUsers(data.map(u => ({
+          id: u.id,
+          firstName: u.first_name,
+          lastName: u.last_name,
+          email: u.email,
+          phone: u.phone || '',
+          role: u.role as UserRole,
+          status: u.status as UserStatus,
+          organization: u.organization || '-',
+          lastLogin: u.last_login ? new Date(u.last_login).toLocaleDateString(lang) : '-',
+          createdAt: new Date(u.created_at).toLocaleDateString(lang),
+          isOnline: u.is_online || false
+        })));
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les utilisateurs.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, [lang]);
+
+  // --- 2. ACTIONS DE STATUT ---
+  const updateUserStatus = async (id: string, status: UserStatus) => {
+    setIsActionLoading(true);
+    try {
+      const { error } = await supabase.from('profiles').update({ status }).eq('id', id);
+      if (error) throw error;
+
+      setUsers(prev => prev.map(u => u.id === id ? { ...u, status } : u));
+      if (selectedUser?.id === id) setSelectedUser(prev => prev ? { ...prev, status } : null);
+      toast({ title: "Statut mis à jour", description: `L'utilisateur est maintenant ${status}.` });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const deleteUser = async (id: string) => {
+    if (!confirm("Êtes-vous sûr de vouloir supprimer ce profil ?")) return;
+    setIsActionLoading(true);
+    try {
+      const { error } = await supabase.from('profiles').delete().eq('id', id);
+      if (error) throw error;
+
+      setUsers(prev => prev.filter(u => u.id !== id));
+      if (selectedUser?.id === id) setSelectedUser(null);
+      toast({ title: "Profil supprimé" });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // --- 3. INVITATION UTILISATEUR ---
+  const handleInviteUser = async () => {
+    if (!inviteForm.email || !inviteForm.firstName || !inviteForm.role) {
+      toast({ title: "Erreur", description: "Veuillez remplir les champs obligatoires.", variant: "destructive" });
+      return;
+    }
+
+    setIsInviting(true);
+    try {
+      // Simule la création d'un profil "en attente" dans la base
+      const fakeId = crypto.randomUUID(); 
+      const { error } = await supabase.from('profiles').insert([{
+        id: fakeId,
+        email: inviteForm.email,
+        first_name: inviteForm.firstName,
+        last_name: inviteForm.lastName,
+        role: inviteForm.role,
+        organization: inviteForm.organization || '-',
+        status: 'pending'
+      }]);
+
+      if (error) throw error;
+
+      toast({ title: "Invitation envoyée", description: `Un accès a été préparé pour ${inviteForm.email}` });
+      setIsInviteModalOpen(false);
+      setInviteForm({ email: '', firstName: '', lastName: '', role: '', organization: '' });
+      fetchUsers();
+    } catch (error: any) {
+      toast({ title: "Erreur d'invitation", description: error.message, variant: "destructive" });
+    } finally {
+      setIsInviting(false);
+    }
+  };
 
   const filtered = users.filter(u => {
     const matchSearch = `${u.firstName} ${u.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
@@ -102,35 +203,10 @@ const UsersModule: React.FC = () => {
     online: users.filter(u => u.isOnline).length,
   };
 
-  const handleCreate = () => {
-    if (!newUser.firstName.trim() || !newUser.email.trim()) return;
-    const user: ManagedUser = {
-      id: Date.now().toString(), firstName: newUser.firstName, lastName: newUser.lastName,
-      email: newUser.email, phone: newUser.phone, role: newUser.role, status: 'pending',
-      organization: newUser.organization, lastLogin: '-',
-      createdAt: new Date().toISOString().split('T')[0], isOnline: false,
-    };
-    setUsers(prev => [user, ...prev]);
-    setNewUser({ firstName: '', lastName: '', email: '', phone: '', role: 'professional', organization: '' });
-    setShowCreate(false);
-  };
-
-  const updateUserStatus = (id: string, status: UserStatus) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, status } : u));
-    if (selectedUser?.id === id) setSelectedUser(prev => prev ? { ...prev, status } : null);
-  };
-
-  const deleteUser = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
-    if (selectedUser?.id === id) setSelectedUser(null);
-  };
-
   const l = {
     fr: { title: 'Gestion des utilisateurs', search: 'Rechercher un utilisateur...', newUser: 'Nouvel utilisateur', total: 'Total', active: 'Actifs', pending: 'En attente', online: 'En ligne', all: 'Tous', allRoles: 'Tous les rôles', details: 'Détails', role: 'Rôle', status: 'Statut', email: 'Email', phone: 'Téléphone', organization: 'Organisation', lastLogin: 'Dernière connexion', memberSince: 'Membre depuis', firstName: 'Prénom', lastName: 'Nom', create: 'Créer', cancel: 'Annuler', noResults: 'Aucun utilisateur trouvé', selectUser: 'Sélectionnez un utilisateur', activate: 'Activer', deactivate: 'Désactiver', suspend: 'Suspendre', delete: 'Supprimer', approve: 'Approuver', actions: 'Actions', edit: 'Modifier', resetPassword: 'Réinitialiser mot de passe' },
     en: { title: 'User management', search: 'Search users...', newUser: 'New user', total: 'Total', active: 'Active', pending: 'Pending', online: 'Online', all: 'All', allRoles: 'All roles', details: 'Details', role: 'Role', status: 'Status', email: 'Email', phone: 'Phone', organization: 'Organization', lastLogin: 'Last login', memberSince: 'Member since', firstName: 'First name', lastName: 'Last name', create: 'Create', cancel: 'Cancel', noResults: 'No users found', selectUser: 'Select a user', activate: 'Activate', deactivate: 'Deactivate', suspend: 'Suspend', delete: 'Delete', approve: 'Approve', actions: 'Actions', edit: 'Edit', resetPassword: 'Reset password' },
-    pt: { title: 'Gestão de usuários', search: 'Pesquisar usuários...', newUser: 'Novo usuário', total: 'Total', active: 'Ativos', pending: 'Pendentes', online: 'Online', all: 'Todos', allRoles: 'Todas as funções', details: 'Detalhes', role: 'Função', status: 'Status', email: 'Email', phone: 'Telefone', organization: 'Organização', lastLogin: 'Último acesso', memberSince: 'Membro desde', firstName: 'Nome', lastName: 'Sobrenome', create: 'Criar', cancel: 'Cancelar', noResults: 'Nenhum usuário encontrado', selectUser: 'Selecione um usuário', activate: 'Ativar', deactivate: 'Desativar', suspend: 'Suspender', delete: 'Excluir', approve: 'Aprovar', actions: 'Ações', edit: 'Editar', resetPassword: 'Redefinir senha' },
-    ar: { title: 'إدارة المستخدمين', search: 'البحث عن مستخدم...', newUser: 'مستخدم جديد', total: 'الإجمالي', active: 'نشطون', pending: 'قيد الانتظار', online: 'متصلون', all: 'الكل', allRoles: 'جميع الأدوار', details: 'التفاصيل', role: 'الدور', status: 'الحالة', email: 'البريد', phone: 'الهاتف', organization: 'المنظمة', lastLogin: 'آخر دخول', memberSince: 'عضو منذ', firstName: 'الاسم', lastName: 'اللقب', create: 'إنشاء', cancel: 'إلغاء', noResults: 'لا يوجد مستخدمون', selectUser: 'اختر مستخدمًا', activate: 'تفعيل', deactivate: 'تعطيل', suspend: 'تعليق', delete: 'حذف', approve: 'موافقة', actions: 'إجراءات', edit: 'تعديل', resetPassword: 'إعادة تعيين كلمة المرور' },
-  }[lang] || { title: 'Utilisateurs', search: 'Rechercher...', newUser: 'Nouveau', total: 'Total', active: 'Actifs', pending: 'En attente', online: 'En ligne', all: 'Tous', allRoles: 'Tous', details: 'Détails', role: 'Rôle', status: 'Statut', email: 'Email', phone: 'Tél', organization: 'Org', lastLogin: 'Dernière co.', memberSince: 'Depuis', firstName: 'Prénom', lastName: 'Nom', create: 'Créer', cancel: 'Annuler', noResults: 'Aucun', selectUser: 'Sélectionner', activate: 'Activer', deactivate: 'Désactiver', suspend: 'Suspendre', delete: 'Supprimer', approve: 'Approuver', actions: 'Actions', edit: 'Modifier', resetPassword: 'Réinit. MDP' };
+  }[lang] || { title: 'Utilisateurs' };
 
   return (
     <DashboardLayout>
@@ -139,46 +215,11 @@ const UsersModule: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">{l.title}</h1>
-            <p className="text-muted-foreground text-sm">{stats.total} utilisateurs</p>
+            <p className="text-muted-foreground text-sm">{stats.total} utilisateurs enregistrés</p>
           </div>
-          <Dialog open={showCreate} onOpenChange={setShowCreate}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-2" />{l.newUser}</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2"><Users className="h-5 w-5" />{l.newUser}</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>{l.firstName} *</Label><Input value={newUser.firstName} onChange={e => setNewUser(p => ({ ...p, firstName: e.target.value }))} className="mt-1" /></div>
-                  <div><Label>{l.lastName}</Label><Input value={newUser.lastName} onChange={e => setNewUser(p => ({ ...p, lastName: e.target.value }))} className="mt-1" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>{l.email} *</Label><Input type="email" value={newUser.email} onChange={e => setNewUser(p => ({ ...p, email: e.target.value }))} className="mt-1" /></div>
-                  <div><Label>{l.phone}</Label><Input value={newUser.phone} onChange={e => setNewUser(p => ({ ...p, phone: e.target.value }))} placeholder="+225..." className="mt-1" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>{l.role}</Label>
-                    <Select value={newUser.role} onValueChange={v => setNewUser(p => ({ ...p, role: v as UserRole }))}>
-                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(roleLabels) as UserRole[]).map(r => (
-                          <SelectItem key={r} value={r}>{roleLabels[r][lang]}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div><Label>{l.organization}</Label><Input value={newUser.organization} onChange={e => setNewUser(p => ({ ...p, organization: e.target.value }))} className="mt-1" /></div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setShowCreate(false)}>{l.cancel}</Button>
-                  <Button onClick={handleCreate}>{l.create}</Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+          <Button onClick={() => setIsInviteModalOpen(true)} className="bg-primary text-primary-foreground font-bold shadow-md">
+            <UserPlus className="h-4 w-4 mr-2" /> Inviter un collaborateur
+          </Button>
         </div>
 
         {/* Stats */}
@@ -193,7 +234,7 @@ const UsersModule: React.FC = () => {
               <CardContent className="p-4 flex items-center gap-3">
                 <div className={`p-2 rounded-lg bg-muted ${s.color}`}><s.icon className="h-5 w-5" /></div>
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{s.value}</p>
+                  <p className="text-2xl font-bold text-foreground">{isLoading ? '...' : s.value}</p>
                   <p className="text-xs text-muted-foreground">{s.label}</p>
                 </div>
               </CardContent>
@@ -228,124 +269,164 @@ const UsersModule: React.FC = () => {
         </div>
 
         {/* Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* User list */}
-          <div className="lg:col-span-2 space-y-2">
-            {filtered.length === 0 ? (
-              <Card><CardContent className="p-8 text-center text-muted-foreground"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{l.noResults}</p></CardContent></Card>
-            ) : filtered.map(u => (
-              <Card
-                key={u.id}
-                className={`cursor-pointer transition-all hover:shadow-md ${selectedUser?.id === u.id ? 'ring-2 ring-primary' : ''}`}
-                onClick={() => setSelectedUser(u)}
-              >
-                <CardContent className="p-4 flex items-center gap-4">
-                  {/* Avatar */}
-                  <div className="relative flex-shrink-0">
-                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-foreground">
-                      {u.firstName[0]}{u.lastName[0]}
+        {isLoading ? (
+          <div className="flex justify-center py-20"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-2">
+              {filtered.length === 0 ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">Aucun utilisateur trouvé.</CardContent></Card>
+              ) : filtered.map(u => (
+                <Card
+                  key={u.id}
+                  className={`cursor-pointer transition-all hover:shadow-md ${selectedUser?.id === u.id ? 'ring-2 ring-primary' : ''}`}
+                  onClick={() => setSelectedUser(u)}
+                >
+                  <CardContent className="p-4 flex items-center gap-4">
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-foreground uppercase">
+                        {u.firstName[0]}{u.lastName[0]}
+                      </div>
+                      {u.isOnline && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-card" />}
                     </div>
-                    {u.isOnline && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-card" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground">{u.firstName} {u.lastName}</p>
-                    <p className="text-xs text-muted-foreground">{u.email}</p>
-                    <p className="text-xs text-muted-foreground">{u.organization}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <Badge className={`text-xs ${roleColors[u.role]}`}>{roleLabels[u.role][lang]}</Badge>
-                    <Badge className={`text-xs ${statusConfig[u.status]?.style || ''}`}>{statusConfig[u.status]?.label[lang]}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground truncate">{u.firstName} {u.lastName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Badge className={`text-[10px] ${roleColors[u.role]}`}>{roleLabels[u.role][lang]}</Badge>
+                      <Badge className={`text-[10px] ${statusConfig[u.status]?.style || ''}`}>{statusConfig[u.status]?.label[lang]}</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
 
-          {/* Detail panel */}
-          <div>
-            {selectedUser ? (
-              <Card className="sticky top-20">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-lg font-bold text-foreground">
+            {/* Detail panel */}
+            <div>
+              {selectedUser ? (
+                <Card className="sticky top-24">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-lg font-bold text-foreground uppercase">
                         {selectedUser.firstName[0]}{selectedUser.lastName[0]}
                       </div>
-                      {selectedUser.isOnline && <div className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-card" />}
+                      <div>
+                        <CardTitle className="text-lg">{selectedUser.firstName} {selectedUser.lastName}</CardTitle>
+                        <p className="text-xs text-muted-foreground">{selectedUser.email}</p>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle className="text-lg">{selectedUser.firstName} {selectedUser.lastName}</CardTitle>
-                      <p className="text-sm text-muted-foreground">{selectedUser.email}</p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex gap-2 flex-wrap">
+                      <Badge className={roleColors[selectedUser.role]}>{roleLabels[selectedUser.role][lang]}</Badge>
+                      <Badge className={statusConfig[selectedUser.status]?.style}>{statusConfig[selectedUser.status]?.label[lang]}</Badge>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-2 flex-wrap">
-                    <Badge className={roleColors[selectedUser.role]}>{roleLabels[selectedUser.role][lang]}</Badge>
-                    <Badge className={statusConfig[selectedUser.status]?.style}>{statusConfig[selectedUser.status]?.label[lang]}</Badge>
-                  </div>
 
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /><span className="text-foreground">{selectedUser.email}</span></div>
-                    <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground" /><span className="text-foreground">{selectedUser.phone}</span></div>
-                    <div className="flex items-center gap-2"><Building className="h-4 w-4 text-muted-foreground" /><span className="text-foreground">{selectedUser.organization}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">{l.lastLogin}</span><span className="text-foreground">{selectedUser.lastLogin}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">{l.memberSince}</span><span className="text-foreground">{selectedUser.createdAt}</span></div>
-                  </div>
-
-                  {/* Role-specific permissions summary */}
-                  <div className="bg-muted/50 rounded-lg p-3">
-                    <p className="text-xs font-medium text-muted-foreground uppercase mb-2">{l.role}</p>
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-primary" />
-                      <span className="text-sm font-medium text-foreground">{roleLabels[selectedUser.role][lang]}</span>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground" /><span>{selectedUser.email}</span></div>
+                      <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground" /><span>{selectedUser.phone || '-'}</span></div>
+                      <div className="flex items-center gap-2"><Building className="h-4 w-4 text-muted-foreground" /><span>{selectedUser.organization}</span></div>
+                      <div className="flex justify-between border-t pt-2 mt-2"><span className="text-muted-foreground">{l.lastLogin}</span><span>{selectedUser.lastLogin}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">{l.memberSince}</span><span>{selectedUser.createdAt}</span></div>
                     </div>
-                  </div>
 
-                  {/* Actions */}
-                  <div className="border-t border-border pt-4 space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase">{l.actions}</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {selectedUser.status === 'pending' && (
-                        <Button size="sm" className="text-xs" onClick={() => updateUserStatus(selectedUser.id, 'active')}>
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{l.approve}
+                    <div className="border-t border-border pt-4 space-y-2">
+                      <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">{l.actions}</p>
+                      <div className="grid grid-cols-1 gap-2">
+                        {selectedUser.status === 'pending' && (
+                          <Button disabled={isActionLoading} size="sm" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => updateUserStatus(selectedUser.id, 'active')}>
+                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{l.approve}
+                          </Button>
+                        )}
+                        {selectedUser.status === 'active' && (
+                          <Button disabled={isActionLoading} size="sm" variant="outline" className="w-full text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => updateUserStatus(selectedUser.id, 'suspended')}>
+                            <Lock className="h-3.5 w-3.5 mr-1" />{l.suspend}
+                          </Button>
+                        )}
+                        {(selectedUser.status === 'suspended' || selectedUser.status === 'inactive') && (
+                          <Button disabled={isActionLoading} size="sm" variant="outline" className="w-full text-emerald-600 border-emerald-200 hover:bg-emerald-50" onClick={() => updateUserStatus(selectedUser.id, 'active')}>
+                            <Unlock className="h-3.5 w-3.5 mr-1" />{l.activate}
+                          </Button>
+                        )}
+                        <Button disabled={isActionLoading} size="sm" variant="destructive" className="w-full" onClick={() => deleteUser(selectedUser.id)}>
+                          <Trash2 className="h-3.5 w-3.5 mr-1" />{l.delete}
                         </Button>
-                      )}
-                      {selectedUser.status === 'active' && (
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => updateUserStatus(selectedUser.id, 'suspended')}>
-                          <Lock className="h-3.5 w-3.5 mr-1" />{l.suspend}
-                        </Button>
-                      )}
-                      {(selectedUser.status === 'suspended' || selectedUser.status === 'inactive') && (
-                        <Button size="sm" className="text-xs" onClick={() => updateUserStatus(selectedUser.id, 'active')}>
-                          <Unlock className="h-3.5 w-3.5 mr-1" />{l.activate}
-                        </Button>
-                      )}
-                      {selectedUser.status === 'active' && (
-                        <Button size="sm" variant="outline" className="text-xs" onClick={() => updateUserStatus(selectedUser.id, 'inactive')}>
-                          <UserX className="h-3.5 w-3.5 mr-1" />{l.deactivate}
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline" className="text-xs">
-                        <Lock className="h-3.5 w-3.5 mr-1" />{l.resetPassword}
-                      </Button>
-                      <Button size="sm" variant="destructive" className="text-xs" onClick={() => deleteUser(selectedUser.id)}>
-                        <Trash2 className="h-3.5 w-3.5 mr-1" />{l.delete}
-                      </Button>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="p-12 text-center text-muted-foreground">
-                  <Users className="h-16 w-16 mx-auto mb-4 opacity-20" />
-                  <p>{l.selectUser}</p>
-                </CardContent>
-              </Card>
-            )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card>
+                  <CardContent className="p-12 text-center text-muted-foreground border-dashed border-2">
+                    <Users className="h-16 w-16 mx-auto mb-4 opacity-10" />
+                    <p className="text-sm font-medium">{l.selectUser}</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* MODAL INVITATION */}
+        <Dialog open={isInviteModalOpen} onOpenChange={setIsInviteModalOpen}>
+          <DialogContent className="max-w-md rounded-2xl p-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-primary" /> Inviter un utilisateur
+              </DialogTitle>
+              <DialogDescription className="mt-1">
+                Préparez un accès sécurisé pour un nouveau collaborateur NURIA.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase font-bold text-muted-foreground">Prénom <span className="text-red-500">*</span></Label>
+                  <Input placeholder="Ex: Jean" value={inviteForm.firstName} onChange={e => setInviteForm({...inviteForm, firstName: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase font-bold text-muted-foreground">Nom</Label>
+                  <Input placeholder="Ex: Koffi" value={inviteForm.lastName} onChange={e => setInviteForm({...inviteForm, lastName: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs uppercase font-bold text-muted-foreground">Adresse Email <span className="text-red-500">*</span></Label>
+                <Input type="email" placeholder="jean.koffi@hopital.ci" value={inviteForm.email} onChange={e => setInviteForm({...inviteForm, email: e.target.value})} />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs uppercase font-bold text-muted-foreground">Rôle assigné <span className="text-red-500">*</span></Label>
+                <Select onValueChange={v => setInviteForm({...inviteForm, role: v})} value={inviteForm.role}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sélectionner un rôle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(roleLabels) as UserRole[]).map(r => (
+                      <SelectItem key={r} value={r}>{roleLabels[r][lang]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs uppercase font-bold text-muted-foreground">Organisation / Structure</Label>
+                <Input placeholder="Ex: CHU de Cocody, ONG locale..." value={inviteForm.organization} onChange={e => setInviteForm({...inviteForm, organization: e.target.value})} />
+                <p className="text-[10px] text-muted-foreground">Laissez vide si l'utilisateur appartient au niveau national.</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => setIsInviteModalOpen(false)}>Annuler</Button>
+              <Button className="flex-1 bg-primary" onClick={handleInviteUser} disabled={isInviting}>
+                {isInviting ? <Loader2 className="animate-spin h-4 w-4" /> : "Envoyer l'invitation"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </DashboardLayout>
   );

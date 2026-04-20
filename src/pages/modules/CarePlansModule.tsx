@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext'; // <-- AJOUT : pour récupérer l'user
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,8 +15,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   Stethoscope, Search, Plus, ArrowLeft, Calendar, Clock, User, Target,
   CheckCircle2, AlertTriangle, FileText, TrendingUp, Edit, Trash2,
-  ChevronRight, Activity, Brain, Heart, Eye, Users, ClipboardList
+  ChevronRight, Activity, Brain, Heart, Eye, Users, ClipboardList, Loader2 // <-- AJOUT Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT : Connexion Supabase
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT : Notifications
 
 interface Objective {
   id: string;
@@ -51,82 +54,8 @@ interface CarePlan {
   interventions: Intervention[];
   teamMembers: { name: string; role: string; specialty: string }[];
   notes: { date: string; author: string; content: string }[];
+  db_id?: string; // <-- AJOUT : Pour lier l'ID local à l'ID Supabase
 }
-
-const initialPlans: CarePlan[] = [
-  {
-    id: '1', childName: 'Amadou Diallo', childAge: '5 ans', diagnosis: 'Trouble du spectre autistique (TSA)',
-    status: 'active', createdDate: '2026-01-15', lastReview: '2026-02-28', nextReview: '2026-03-28',
-    overallProgress: 45, coordinator: 'Dr. Fatou Ndiaye',
-    objectives: [
-      { id: 'o1', description: 'Améliorer la communication verbale : produire des phrases de 3 mots', domain: 'Langage', targetDate: '2026-06-15', progress: 60, status: 'in_progress', milestones: [{ id: 'm1', label: 'Utilise des mots isolés', done: true }, { id: 'm2', label: 'Combine 2 mots', done: true }, { id: 'm3', label: 'Phrases de 3 mots', done: false }] },
-      { id: 'o2', description: 'Développer les interactions sociales avec les pairs', domain: 'Social', targetDate: '2026-07-01', progress: 30, status: 'in_progress', milestones: [{ id: 'm4', label: 'Tolère la proximité', done: true }, { id: 'm5', label: 'Jeu parallèle', done: false }, { id: 'm6', label: 'Jeu interactif', done: false }] },
-      { id: 'o3', description: 'Réduire les comportements répétitifs', domain: 'Comportement', targetDate: '2026-08-01', progress: 20, status: 'in_progress', milestones: [{ id: 'm7', label: 'Identifier les déclencheurs', done: true }, { id: 'm8', label: 'Stratégies alternatives', done: false }] },
-    ],
-    interventions: [
-      { id: 'i1', type: 'Orthophonie', professional: 'Mme Koné', frequency: '2x/semaine', notes: 'Méthode PECS en cours', startDate: '2026-01-20' },
-      { id: 'i2', type: 'Psychomotricité', professional: 'M. Traoré', frequency: '1x/semaine', notes: 'Travail sur l\'intégration sensorielle', startDate: '2026-02-01' },
-      { id: 'i3', type: 'ABA', professional: 'Dr. Sow', frequency: '3x/semaine', notes: 'Programme comportemental individualisé', startDate: '2026-01-15' },
-    ],
-    teamMembers: [
-      { name: 'Dr. Fatou Ndiaye', role: 'Coordinatrice', specialty: 'Pédopsychiatre' },
-      { name: 'Mme Koné', role: 'Thérapeute', specialty: 'Orthophoniste' },
-      { name: 'M. Traoré', role: 'Thérapeute', specialty: 'Psychomotricien' },
-      { name: 'Dr. Sow', role: 'Thérapeute', specialty: 'Analyste comportemental' },
-    ],
-    notes: [
-      { date: '2026-02-28', author: 'Dr. Ndiaye', content: 'Progrès encourageants en communication. Amadou utilise maintenant 15 mots fonctionnels.' },
-      { date: '2026-02-10', author: 'Mme Koné', content: 'Début PECS phase 2 : échange d\'images avec discrimination.' },
-    ],
-  },
-  {
-    id: '2', childName: 'Mariama Bah', childAge: '7 ans', diagnosis: 'TDAH - Type combiné',
-    status: 'review', createdDate: '2025-11-10', lastReview: '2026-02-15', nextReview: '2026-03-15',
-    overallProgress: 65, coordinator: 'Dr. Oumar Sy',
-    objectives: [
-      { id: 'o4', description: 'Améliorer l\'attention soutenue en classe (15 min)', domain: 'Cognitif', targetDate: '2026-05-01', progress: 70, status: 'in_progress', milestones: [{ id: 'm9', label: '5 min d\'attention', done: true }, { id: 'm10', label: '10 min d\'attention', done: true }, { id: 'm11', label: '15 min d\'attention', done: false }] },
-      { id: 'o5', description: 'Développer l\'organisation des tâches scolaires', domain: 'Autonomie', targetDate: '2026-06-01', progress: 55, status: 'in_progress', milestones: [{ id: 'm12', label: 'Utilise un agenda', done: true }, { id: 'm13', label: 'Planifie ses devoirs', done: false }] },
-    ],
-    interventions: [
-      { id: 'i4', type: 'Neuropsychologie', professional: 'Dr. Camara', frequency: '1x/semaine', notes: 'Entraînement cognitif', startDate: '2025-11-15' },
-      { id: 'i5', type: 'Suivi pédagogique', professional: 'M. Diop', frequency: '2x/semaine', notes: 'Adaptations scolaires', startDate: '2025-12-01' },
-    ],
-    teamMembers: [
-      { name: 'Dr. Oumar Sy', role: 'Coordinateur', specialty: 'Neuropédiatre' },
-      { name: 'Dr. Camara', role: 'Thérapeute', specialty: 'Neuropsychologue' },
-    ],
-    notes: [
-      { date: '2026-02-15', author: 'Dr. Sy', content: 'Révision prévue pour ajuster le plan. Mariama montre des améliorations significatives.' },
-    ],
-  },
-  {
-    id: '3', childName: 'Ibrahim Touré', childAge: '3 ans', diagnosis: 'Retard global de développement',
-    status: 'draft', createdDate: '2026-03-01', lastReview: '-', nextReview: '2026-04-01',
-    overallProgress: 0, coordinator: 'Dr. Fatou Ndiaye',
-    objectives: [],
-    interventions: [],
-    teamMembers: [{ name: 'Dr. Fatou Ndiaye', role: 'Coordinatrice', specialty: 'Pédopsychiatre' }],
-    notes: [{ date: '2026-03-01', author: 'Dr. Ndiaye', content: 'Plan en cours d\'élaboration suite au bilan initial.' }],
-  },
-  {
-    id: '4', childName: 'Aïssatou Camara', childAge: '6 ans', diagnosis: 'Trouble du langage expressif',
-    status: 'completed', createdDate: '2025-06-01', lastReview: '2026-01-15', nextReview: '-',
-    overallProgress: 100, coordinator: 'Dr. Oumar Sy',
-    objectives: [
-      { id: 'o6', description: 'Atteindre un vocabulaire expressif de 200 mots', domain: 'Langage', targetDate: '2025-12-31', progress: 100, status: 'achieved', milestones: [{ id: 'm14', label: '50 mots', done: true }, { id: 'm15', label: '100 mots', done: true }, { id: 'm16', label: '200 mots', done: true }] },
-    ],
-    interventions: [
-      { id: 'i6', type: 'Orthophonie intensive', professional: 'Mme Koné', frequency: '3x/semaine', notes: 'Programme terminé avec succès', startDate: '2025-06-15' },
-    ],
-    teamMembers: [
-      { name: 'Dr. Oumar Sy', role: 'Coordinateur', specialty: 'Neuropédiatre' },
-      { name: 'Mme Koné', role: 'Thérapeute', specialty: 'Orthophoniste' },
-    ],
-    notes: [
-      { date: '2026-01-15', author: 'Dr. Sy', content: 'Objectifs atteints. Plan clôturé. Suivi de contrôle dans 6 mois.' },
-    ],
-  },
-];
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   active: { label: 'Actif', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: <Activity className="h-3 w-3" /> },
@@ -145,7 +74,13 @@ const domainIcons: Record<string, React.ReactNode> = {
 
 const CarePlansModule: React.FC = () => {
   const { t } = useLanguage();
-  const [plans, setPlans] = useState<CarePlan[]>(initialPlans);
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [plans, setPlans] = useState<CarePlan[]>([]); // Vide par défaut (plus de données fictives)
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedPlan, setSelectedPlan] = useState<CarePlan | null>(null);
@@ -154,6 +89,70 @@ const CarePlansModule: React.FC = () => {
 
   // New plan form
   const [newPlan, setNewPlan] = useState({ childName: '', childAge: '', diagnosis: '', coordinator: '' });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchPlans = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('care_plans')
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        const formattedPlans: CarePlan[] = data.map(item => ({
+          ...item.full_data, // Restaure l'objet complexe complet (objectifs, milestones, notes)
+          db_id: item.id // Garde la trace de l'ID Supabase pour les futures mises à jour
+        }));
+        setPlans(formattedPlans);
+      }
+    } catch (error: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les plans de prise en charge.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPlans();
+  }, []);
+
+  // --- 2. SAUVEGARDE DANS SUPABASE (Création & Mise à jour) ---
+  const savePlanToDB = async (planToSave: CarePlan) => {
+    setIsSaving(true);
+    try {
+      const dbPayload = {
+        user_id: user?.id,
+        child_name: planToSave.childName,
+        child_age: planToSave.childAge,
+        diagnosis: planToSave.diagnosis,
+        status: planToSave.status,
+        coordinator: planToSave.coordinator,
+        overall_progress: planToSave.overallProgress,
+        next_review: planToSave.nextReview === '-' ? null : planToSave.nextReview,
+        full_data: planToSave, // On stocke tout l'objet JSON tel quel
+        updated_at: new Date().toISOString()
+      };
+
+      if (planToSave.db_id) {
+        // Mise à jour d'un plan existant
+        const { error } = await supabase.from('care_plans').update(dbPayload).eq('id', planToSave.db_id);
+        if (error) throw error;
+      } else {
+        // Création d'un nouveau plan
+        const { data, error } = await supabase.from('care_plans').insert([dbPayload]).select().single();
+        if (error) throw error;
+        if (data) planToSave.db_id = data.id; // Récupère l'ID généré par Supabase
+      }
+
+    } catch (error: any) {
+      toast({ title: "Erreur de sauvegarde", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const filtered = plans.filter(p => {
     const matchesSearch = p.childName.toLowerCase().includes(search.toLowerCase()) || p.diagnosis.toLowerCase().includes(search.toLowerCase());
@@ -168,7 +167,7 @@ const CarePlansModule: React.FC = () => {
     completed: plans.filter(p => p.status === 'completed').length,
   };
 
-  const handleCreatePlan = () => {
+  const handleCreatePlan = async () => {
     if (!newPlan.childName) return;
     const plan: CarePlan = {
       id: Date.now().toString(), childName: newPlan.childName, childAge: newPlan.childAge,
@@ -176,12 +175,18 @@ const CarePlansModule: React.FC = () => {
       lastReview: '-', nextReview: '', overallProgress: 0, coordinator: newPlan.coordinator,
       objectives: [], interventions: [], teamMembers: [], notes: [],
     };
+    
+    // Sauvegarde en DB puis maj état local
+    await savePlanToDB(plan);
     setPlans(prev => [plan, ...prev]);
     setNewPlan({ childName: '', childAge: '', diagnosis: '', coordinator: '' });
     setShowNewPlan(false);
+    toast({ title: "Succès", description: "Le nouveau plan a été créé." });
   };
 
-  const toggleMilestone = (planId: string, objectiveId: string, milestoneId: string) => {
+  const toggleMilestone = async (planId: string, objectiveId: string, milestoneId: string) => {
+    let updatedPlan: CarePlan | null = null;
+    
     setPlans(prev => prev.map(p => {
       if (p.id !== planId) return p;
       const objectives = p.objectives.map(o => {
@@ -193,24 +198,38 @@ const CarePlansModule: React.FC = () => {
         return { ...o, milestones, progress, status };
       });
       const overallProgress = objectives.length ? Math.round(objectives.reduce((s, o) => s + o.progress, 0) / objectives.length) : 0;
-      return { ...p, objectives, overallProgress };
+      updatedPlan = { ...p, objectives, overallProgress };
+      return updatedPlan;
     }));
-    if (selectedPlan?.id === planId) {
-      setSelectedPlan(prev => {
-        if (!prev) return prev;
-        const updated = plans.find(p => p.id === planId);
-        return updated || prev;
-      });
+
+    if (updatedPlan) {
+      await savePlanToDB(updatedPlan); // Sauvegarde automatique du clic en DB
+      if (selectedPlan?.id === planId) setSelectedPlan(updatedPlan);
     }
   };
 
-  const addNote = (planId: string) => {
+  const addNote = async (planId: string) => {
     if (!newNote.trim()) return;
-    setPlans(prev => prev.map(p => p.id === planId ? {
-      ...p, notes: [{ date: new Date().toISOString().split('T')[0], author: 'Vous', content: newNote }, ...p.notes]
-    } : p));
+    let updatedPlan: CarePlan | null = null;
+
+    setPlans(prev => prev.map(p => {
+      if (p.id === planId) {
+        updatedPlan = {
+          ...p, notes: [{ date: new Date().toISOString().split('T')[0], author: user?.firstName || 'Utilisateur', content: newNote }, ...p.notes]
+        };
+        return updatedPlan;
+      }
+      return p;
+    }));
+
+    if (updatedPlan) {
+      await savePlanToDB(updatedPlan); // Sauvegarde de la note en DB
+      if (selectedPlan?.id === planId) setSelectedPlan(updatedPlan);
+      toast({ title: "Note ajoutée", description: "La note de suivi a été enregistrée." });
+    }
     setNewNote('');
   };
+
 
   // Detail view
   if (selectedPlan) {
@@ -291,7 +310,7 @@ const CarePlansModule: React.FC = () => {
                     <p className="text-xs font-medium text-muted-foreground uppercase">Jalons</p>
                     {obj.milestones.map(m => (
                       <label key={m.id} className="flex items-center gap-3 cursor-pointer py-1">
-                        <Checkbox checked={m.done} onCheckedChange={() => toggleMilestone(plan.id, obj.id, m.id)} />
+                        <Checkbox checked={m.done} onCheckedChange={() => toggleMilestone(plan.id, obj.id, m.id)} disabled={isSaving} />
                         <span className={`text-sm ${m.done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{m.label}</span>
                       </label>
                     ))}
@@ -352,7 +371,9 @@ const CarePlansModule: React.FC = () => {
             <TabsContent value="notes" className="space-y-4">
               <div className="flex gap-2">
                 <Textarea placeholder="Ajouter une note de suivi..." value={newNote} onChange={e => setNewNote(e.target.value)} className="flex-1" />
-                <Button onClick={() => addNote(plan.id)} disabled={!newNote.trim()}>Ajouter</Button>
+                <Button onClick={() => addNote(plan.id)} disabled={!newNote.trim() || isSaving}>
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Ajouter
+                </Button>
               </div>
               {plan.notes.map((n, i) => (
                 <Card key={i}>
@@ -410,7 +431,9 @@ const CarePlansModule: React.FC = () => {
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setShowNewPlan(false)}>Annuler</Button>
-                  <Button onClick={handleCreatePlan} disabled={!newPlan.childName}>Créer le plan</Button>
+                  <Button onClick={handleCreatePlan} disabled={!newPlan.childName || isSaving}>
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null} Créer le plan
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -460,43 +483,47 @@ const CarePlansModule: React.FC = () => {
         </div>
 
         {/* Plan cards */}
-        <div className="space-y-3">
-          {filtered.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-muted-foreground">
-              <Stethoscope className="h-10 w-10 mx-auto mb-3 opacity-40" />
-              <p>Aucun plan trouvé.</p>
-            </CardContent></Card>
-          ) : filtered.map(plan => {
-            const sc = statusConfig[plan.status];
-            return (
-              <Card key={plan.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedPlan(plan)}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="font-semibold text-foreground">{plan.childName}</h3>
-                        <Badge className={sc.color}>{sc.icon}<span className="ml-1">{sc.label}</span></Badge>
+        {isLoading ? (
+          <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.length === 0 ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground">
+                <Stethoscope className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                <p>Aucun plan trouvé.</p>
+              </CardContent></Card>
+            ) : filtered.map(plan => {
+              const sc = statusConfig[plan.status] || statusConfig.draft; // Fallback sécurité
+              return (
+                <Card key={plan.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedPlan(plan)}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-1">
+                          <h3 className="font-semibold text-foreground">{plan.childName}</h3>
+                          <Badge className={sc.color}>{sc.icon}<span className="ml-1">{sc.label}</span></Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{plan.diagnosis} · {plan.childAge}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1"><User className="h-3 w-3" /> {plan.coordinator}</span>
+                          <span className="flex items-center gap-1"><Target className="h-3 w-3" /> {plan.objectives.length} objectifs</span>
+                          <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Révision : {plan.nextReview || '-'}</span>
+                        </div>
                       </div>
-                      <p className="text-sm text-muted-foreground">{plan.diagnosis} · {plan.childAge}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><User className="h-3 w-3" /> {plan.coordinator}</span>
-                        <span className="flex items-center gap-1"><Target className="h-3 w-3" /> {plan.objectives.length} objectifs</span>
-                        <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Révision : {plan.nextReview || '-'}</span>
+                      <div className="flex items-center gap-4">
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-primary">{plan.overallProgress}%</p>
+                          <Progress value={plan.overallProgress} className="w-20 h-2" />
+                        </div>
+                        <ChevronRight className="h-5 w-5 text-muted-foreground" />
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-center">
-                        <p className="text-lg font-bold text-primary">{plan.overallProgress}%</p>
-                        <Progress value={plan.overallProgress} className="w-20 h-2" />
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

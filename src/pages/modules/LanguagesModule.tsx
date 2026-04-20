@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -14,8 +14,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Globe, Search, Plus, CheckCircle2, AlertTriangle, Clock, Edit, Trash2,
-  Download, Upload, Languages, BarChart3, Eye, RefreshCw
+  Download, Upload, Languages, BarChart3, Eye, RefreshCw, Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 
 const labels: Record<string, Record<string, string>> = {
   title: { fr: 'Gestion des langues', en: 'Language Management', pt: 'Gestão de Idiomas', ar: 'إدارة اللغات' },
@@ -55,6 +57,7 @@ const labels: Record<string, Record<string, string>> = {
 };
 
 interface PlatformLanguage {
+  id: string;
   code: string;
   name: string;
   nativeName: string;
@@ -69,6 +72,7 @@ interface PlatformLanguage {
 }
 
 interface TranslationEntry {
+  id: string;
   key: string;
   module: string;
   fr: string;
@@ -79,40 +83,62 @@ interface TranslationEntry {
 
 const LanguagesModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { toast } = useToast();
   const t = (key: string) => labels[key]?.[lang] || labels[key]?.['fr'] || key;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [translationSearch, setTranslationSearch] = useState('');
   const [filterModule, setFilterModule] = useState('all');
+  
+  const [languages, setLanguages] = useState<PlatformLanguage[]>([]);
+  const [translationEntries, setTranslationEntries] = useState<TranslationEntry[]>([]);
+  
+  const [isLoadingLangs, setIsLoadingLangs] = useState(true);
+  const [isLoadingTrans, setIsLoadingTrans] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingTranslation, setEditingTranslation] = useState<TranslationEntry | null>(null);
+  
+  const [newLang, setNewLang] = useState({ code: '', language: '', nativeName: '', flag: '', direction: 'ltr' });
 
-  const [languages, setLanguages] = useState<PlatformLanguage[]>([
-    { code: 'fr', name: 'Français', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', isActive: true, isDefault: true, coverage: 100, totalKeys: 620, translatedKeys: 620, lastUpdate: '2026-03-10' },
-    { code: 'en', name: 'English', nativeName: 'English', flag: '🇬🇧', direction: 'ltr', isActive: true, isDefault: false, coverage: 98, totalKeys: 620, translatedKeys: 608, lastUpdate: '2026-03-09' },
-    { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', direction: 'ltr', isActive: true, isDefault: false, coverage: 92, totalKeys: 620, translatedKeys: 570, lastUpdate: '2026-03-07' },
-    { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦', direction: 'rtl', isActive: true, isDefault: false, coverage: 85, totalKeys: 620, translatedKeys: 527, lastUpdate: '2026-03-05' },
-    { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', isActive: false, isDefault: false, coverage: 15, totalKeys: 620, translatedKeys: 93, lastUpdate: '2026-02-20' },
-    { code: 'sw', name: 'Swahili', nativeName: 'Kiswahili', flag: '🇰🇪', direction: 'ltr', isActive: false, isDefault: false, coverage: 5, totalKeys: 620, translatedKeys: 31, lastUpdate: '2026-01-15' },
-  ]);
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchData = async () => {
+    setIsLoadingLangs(true);
+    setIsLoadingTrans(true);
+    try {
+      const [langsRes, transRes] = await Promise.all([
+        supabase.from('platform_languages').select('*').order('is_default', { ascending: false }),
+        supabase.from('translations').select('*').order('key', { ascending: true })
+      ]);
 
-  const translationEntries: TranslationEntry[] = [
-    { key: 'sidebar.dashboard', module: 'Navigation', fr: 'Tableau de bord', en: 'Dashboard', pt: 'Painel', ar: 'لوحة التحكم' },
-    { key: 'sidebar.myChildren', module: 'Navigation', fr: 'Mes enfants', en: 'My children', pt: 'Meus filhos', ar: 'أطفالي' },
-    { key: 'login.title', module: 'Auth', fr: 'Connexion', en: 'Login', pt: 'Entrar', ar: 'تسجيل الدخول' },
-    { key: 'login.email', module: 'Auth', fr: 'Email', en: 'Email', pt: 'Email', ar: 'البريد الإلكتروني' },
-    { key: 'login.password', module: 'Auth', fr: 'Mot de passe', en: 'Password', pt: 'Senha', ar: 'كلمة المرور' },
-    { key: 'screening.title', module: 'Screening', fr: 'Dépistage', en: 'Screening', pt: 'Triagem', ar: 'الفحص' },
-    { key: 'screening.start', module: 'Screening', fr: 'Commencer', en: 'Start', pt: 'Iniciar', ar: 'ابدأ' },
-    { key: 'child.name', module: 'Children', fr: 'Nom de l\'enfant', en: 'Child name', pt: 'Nome da criança', ar: 'اسم الطفل' },
-    { key: 'child.age', module: 'Children', fr: 'Âge', en: 'Age', pt: 'Idade', ar: 'العمر' },
-    { key: 'report.generate', module: 'Reporting', fr: 'Générer le rapport', en: 'Generate report', pt: 'Gerar relatório', ar: 'إنشاء التقرير' },
-    { key: 'settings.save', module: 'Settings', fr: 'Enregistrer', en: 'Save', pt: 'Salvar', ar: 'حفظ' },
-    { key: 'common.cancel', module: 'Common', fr: 'Annuler', en: 'Cancel', pt: 'Cancelar', ar: 'إلغاء' },
-    { key: 'common.delete', module: 'Common', fr: 'Supprimer', en: 'Delete', pt: 'Excluir', ar: 'حذف' },
-    { key: 'common.edit', module: 'Common', fr: 'Modifier', en: 'Edit', pt: 'Editar', ar: 'تعديل' },
-    { key: 'common.search', module: 'Common', fr: 'Rechercher', en: 'Search', pt: 'Pesquisar', ar: 'بحث' },
-  ];
+      if (langsRes.error) throw langsRes.error;
+      if (transRes.error) throw transRes.error;
+
+      if (langsRes.data) {
+        setLanguages(langsRes.data.map(l => ({
+          id: l.id, code: l.code, name: l.name, nativeName: l.native_name, flag: l.flag,
+          direction: l.direction, isActive: l.is_active, isDefault: l.is_default, coverage: l.coverage,
+          totalKeys: l.total_keys, translatedKeys: l.translated_keys, lastUpdate: l.last_update
+        })));
+      }
+
+      if (transRes.data) {
+        setTranslationEntries(transRes.data.map(tr => ({
+          id: tr.id, key: tr.key, module: tr.module, fr: tr.fr || '', en: tr.en || '', pt: tr.pt || '', ar: tr.ar || ''
+        })));
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les données.", variant: "destructive" });
+    } finally {
+      setIsLoadingLangs(false);
+      setIsLoadingTrans(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const modules = ['all', 'Navigation', 'Auth', 'Screening', 'Children', 'Reporting', 'Settings', 'Common'];
 
@@ -122,37 +148,104 @@ const LanguagesModule: React.FC = () => {
     l.code.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredTranslations = translationEntries.filter(t =>
-    (filterModule === 'all' || t.module === filterModule) &&
-    (t.key.toLowerCase().includes(translationSearch.toLowerCase()) ||
-     t.fr.toLowerCase().includes(translationSearch.toLowerCase()) ||
-     t.en.toLowerCase().includes(translationSearch.toLowerCase()))
+  const filteredTranslations = translationEntries.filter(tr =>
+    (filterModule === 'all' || tr.module === filterModule) &&
+    (tr.key.toLowerCase().includes(translationSearch.toLowerCase()) ||
+     tr.fr.toLowerCase().includes(translationSearch.toLowerCase()) ||
+     tr.en.toLowerCase().includes(translationSearch.toLowerCase()))
   );
 
-  const toggleLanguageActive = (code: string) => {
-    setLanguages(prev => prev.map(l =>
-      l.code === code && !l.isDefault ? { ...l, isActive: !l.isActive } : l
-    ));
+  // --- 2. ACTIONS SUPABASE (LANGUES) ---
+  const toggleLanguageActive = async (code: string) => {
+    const langToUpdate = languages.find(l => l.code === code);
+    if (!langToUpdate || langToUpdate.isDefault) return;
+    
+    const newStatus = !langToUpdate.isActive;
+    setLanguages(prev => prev.map(l => l.code === code ? { ...l, isActive: newStatus } : l));
+
+    try {
+      const { error } = await supabase.from('platform_languages').update({ is_active: newStatus }).eq('id', langToUpdate.id);
+      if (error) throw error;
+    } catch (err) {
+      toast({ title: "Erreur", description: "Échec de la mise à jour du statut.", variant: "destructive" });
+      fetchData(); // Revert on error
+    }
   };
 
-  const setDefaultLanguage = (code: string) => {
-    setLanguages(prev => prev.map(l => ({
-      ...l,
-      isDefault: l.code === code,
-      isActive: l.code === code ? true : l.isActive,
-    })));
+  const setDefaultLanguage = async (code: string) => {
+    const langToUpdate = languages.find(l => l.code === code);
+    if (!langToUpdate) return;
+
+    setLanguages(prev => prev.map(l => ({ ...l, isDefault: l.code === code, isActive: l.code === code ? true : l.isActive })));
+
+    try {
+      // Retirer le statut par défaut de toutes les autres langues
+      await supabase.from('platform_languages').update({ is_default: false }).neq('code', code);
+      // Appliquer le statut à la nouvelle
+      const { error } = await supabase.from('platform_languages').update({ is_default: true, is_active: true }).eq('id', langToUpdate.id);
+      if (error) throw error;
+      toast({ title: "Succès", description: "Langue par défaut mise à jour." });
+    } catch (err) {
+      toast({ title: "Erreur", description: "Échec de l'opération.", variant: "destructive" });
+      fetchData(); // Revert
+    }
+  };
+
+  const handleAddLanguage = async () => {
+    if (!newLang.code || !newLang.language) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.from('platform_languages').insert([{
+        code: newLang.code.toLowerCase(),
+        name: newLang.language,
+        native_name: newLang.nativeName,
+        flag: newLang.flag,
+        direction: newLang.direction,
+        is_active: false,
+        is_default: false,
+      }]);
+      if (error) throw error;
+      
+      toast({ title: "Succès", description: "Langue ajoutée avec succès." });
+      setShowAddDialog(false);
+      setNewLang({ code: '', language: '', nativeName: '', flag: '', direction: 'ltr' });
+      fetchData();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // --- 3. ACTIONS SUPABASE (TRADUCTIONS) ---
+  const handleSaveTranslation = async () => {
+    if (!editingTranslation) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.from('translations').update({
+        fr: editingTranslation.fr,
+        en: editingTranslation.en,
+        pt: editingTranslation.pt,
+        ar: editingTranslation.ar,
+        updated_at: new Date().toISOString()
+      }).eq('id', editingTranslation.id);
+
+      if (error) throw error;
+
+      setTranslationEntries(prev => prev.map(t => t.id === editingTranslation.id ? editingTranslation : t));
+      setEditingTranslation(null);
+      toast({ title: "Succès", description: "Traduction mise à jour." });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getCoverageColor = (coverage: number) => {
     if (coverage >= 95) return 'text-green-600';
     if (coverage >= 75) return 'text-yellow-600';
     return 'text-red-600';
-  };
-
-  const getCoverageBadge = (coverage: number) => {
-    if (coverage >= 95) return 'default';
-    if (coverage >= 75) return 'secondary';
-    return 'destructive';
   };
 
   return (
@@ -192,7 +285,7 @@ const LanguagesModule: React.FC = () => {
           <Card>
             <CardContent className="p-4 text-center">
               <CheckCircle2 className="h-8 w-8 mx-auto text-green-600 mb-2" />
-              <p className="text-2xl font-bold text-foreground">{languages[0].totalKeys}</p>
+              <p className="text-2xl font-bold text-foreground">{languages.length > 0 ? languages[0].totalKeys : 0}</p>
               <p className="text-xs text-muted-foreground">{t('totalKeys')}</p>
             </CardContent>
           </Card>
@@ -200,7 +293,9 @@ const LanguagesModule: React.FC = () => {
             <CardContent className="p-4 text-center">
               <BarChart3 className="h-8 w-8 mx-auto text-blue-600 mb-2" />
               <p className="text-2xl font-bold text-foreground">
-                {Math.round(languages.filter(l => l.isActive).reduce((s, l) => s + l.coverage, 0) / languages.filter(l => l.isActive).length)}%
+                {languages.filter(l => l.isActive).length > 0 
+                  ? Math.round(languages.filter(l => l.isActive).reduce((s, l) => s + l.coverage, 0) / languages.filter(l => l.isActive).length)
+                  : 0}%
               </p>
               <p className="text-xs text-muted-foreground">{t('coverage')}</p>
             </CardContent>
@@ -239,69 +334,77 @@ const LanguagesModule: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('flagEmoji')}</TableHead>
-                      <TableHead>{t('code')}</TableHead>
-                      <TableHead>{t('language')}</TableHead>
-                      <TableHead>{t('nativeName')}</TableHead>
-                      <TableHead>{t('direction')}</TableHead>
-                      <TableHead>{t('coverage')}</TableHead>
-                      <TableHead>{t('status')}</TableHead>
-                      <TableHead>{t('lastUpdate')}</TableHead>
-                      <TableHead>{t('actions')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredLanguages.map(langItem => (
-                      <TableRow key={langItem.code}>
-                        <TableCell className="text-2xl">{langItem.flag}</TableCell>
-                        <TableCell className="font-mono font-bold text-foreground">{langItem.code.toUpperCase()}</TableCell>
-                        <TableCell className="text-foreground">{langItem.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{langItem.nativeName}</TableCell>
-                        <TableCell>
-                          <Badge variant={langItem.direction === 'rtl' ? 'secondary' : 'outline'}>
-                            {langItem.direction.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Progress value={langItem.coverage} className="w-20 h-2" />
-                            <span className={`text-sm font-medium ${getCoverageColor(langItem.coverage)}`}>
-                              {langItem.coverage}%
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={langItem.isActive}
-                              onCheckedChange={() => toggleLanguageActive(langItem.code)}
-                              disabled={langItem.isDefault}
-                            />
-                            {langItem.isDefault && (
-                              <Badge variant="default">{t('default')}</Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">{langItem.lastUpdate}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            {!langItem.isDefault && (
-                              <Button variant="ghost" size="sm" onClick={() => setDefaultLanguage(langItem.code)} title={t('setDefault')}>
-                                <CheckCircle2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                            <Button variant="ghost" size="sm">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
+                {isLoadingLangs ? (
+                  <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('flagEmoji')}</TableHead>
+                        <TableHead>{t('code')}</TableHead>
+                        <TableHead>{t('language')}</TableHead>
+                        <TableHead>{t('nativeName')}</TableHead>
+                        <TableHead>{t('direction')}</TableHead>
+                        <TableHead>{t('coverage')}</TableHead>
+                        <TableHead>{t('status')}</TableHead>
+                        <TableHead>{t('lastUpdate')}</TableHead>
+                        <TableHead>{t('actions')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredLanguages.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={9} className="text-center text-muted-foreground py-6">Aucune langue trouvée.</TableCell>
+                        </TableRow>
+                      ) : filteredLanguages.map(langItem => (
+                        <TableRow key={langItem.code}>
+                          <TableCell className="text-2xl">{langItem.flag}</TableCell>
+                          <TableCell className="font-mono font-bold text-foreground">{langItem.code.toUpperCase()}</TableCell>
+                          <TableCell className="text-foreground">{langItem.name}</TableCell>
+                          <TableCell className="text-muted-foreground">{langItem.nativeName}</TableCell>
+                          <TableCell>
+                            <Badge variant={langItem.direction === 'rtl' ? 'secondary' : 'outline'}>
+                              {langItem.direction.toUpperCase()}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress value={langItem.coverage} className="w-20 h-2" />
+                              <span className={`text-sm font-medium ${getCoverageColor(langItem.coverage)}`}>
+                                {langItem.coverage}%
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={langItem.isActive}
+                                onCheckedChange={() => toggleLanguageActive(langItem.code)}
+                                disabled={langItem.isDefault}
+                              />
+                              {langItem.isDefault && (
+                                <Badge variant="default">{t('default')}</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">{langItem.lastUpdate}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              {!langItem.isDefault && (
+                                <Button variant="ghost" size="sm" onClick={() => setDefaultLanguage(langItem.code)} title={t('setDefault')}>
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm">
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -333,36 +436,44 @@ const LanguagesModule: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('translationKey')}</TableHead>
-                      <TableHead>{t('module')}</TableHead>
-                      <TableHead>🇫🇷 FR</TableHead>
-                      <TableHead>🇬🇧 EN</TableHead>
-                      <TableHead>🇵🇹 PT</TableHead>
-                      <TableHead>🇸🇦 AR</TableHead>
-                      <TableHead>{t('actions')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTranslations.map(entry => (
-                      <TableRow key={entry.key}>
-                        <TableCell className="font-mono text-xs text-foreground">{entry.key}</TableCell>
-                        <TableCell><Badge variant="outline">{entry.module}</Badge></TableCell>
-                        <TableCell className="text-sm text-foreground">{entry.fr}</TableCell>
-                        <TableCell className="text-sm text-foreground">{entry.en}</TableCell>
-                        <TableCell className="text-sm text-foreground">{entry.pt}</TableCell>
-                        <TableCell className="text-sm text-foreground" dir="rtl">{entry.ar}</TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm" onClick={() => setEditingTranslation(entry)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                {isLoadingTrans ? (
+                  <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('translationKey')}</TableHead>
+                        <TableHead>{t('module')}</TableHead>
+                        <TableHead>🇫🇷 FR</TableHead>
+                        <TableHead>🇬🇧 EN</TableHead>
+                        <TableHead>🇵🇹 PT</TableHead>
+                        <TableHead>🇸🇦 AR</TableHead>
+                        <TableHead>{t('actions')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTranslations.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-muted-foreground py-6">Aucune traduction trouvée.</TableCell>
+                        </TableRow>
+                      ) : filteredTranslations.map(entry => (
+                        <TableRow key={entry.key}>
+                          <TableCell className="font-mono text-xs text-foreground">{entry.key}</TableCell>
+                          <TableCell><Badge variant="outline">{entry.module}</Badge></TableCell>
+                          <TableCell className="text-sm text-foreground">{entry.fr}</TableCell>
+                          <TableCell className="text-sm text-foreground">{entry.en}</TableCell>
+                          <TableCell className="text-sm text-foreground">{entry.pt}</TableCell>
+                          <TableCell className="text-sm text-foreground" dir="rtl">{entry.ar}</TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm" onClick={() => setEditingTranslation(entry)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -422,23 +533,23 @@ const LanguagesModule: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <Label>{t('code')}</Label>
-                <Input placeholder="ex: wo, ha, zu" />
+                <Input value={newLang.code} onChange={e => setNewLang({...newLang, code: e.target.value})} placeholder="ex: wo, ha, zu" />
               </div>
               <div>
                 <Label>{t('language')}</Label>
-                <Input placeholder="ex: Wolof, Hausa, Zulu" />
+                <Input value={newLang.language} onChange={e => setNewLang({...newLang, language: e.target.value})} placeholder="ex: Wolof, Hausa, Zulu" />
               </div>
               <div>
                 <Label>{t('nativeName')}</Label>
-                <Input placeholder="ex: Wolof, Hausa, isiZulu" />
+                <Input value={newLang.nativeName} onChange={e => setNewLang({...newLang, nativeName: e.target.value})} placeholder="ex: Wolof, Hausa, isiZulu" />
               </div>
               <div>
                 <Label>{t('flagEmoji')}</Label>
-                <Input placeholder="🇸🇳" />
+                <Input value={newLang.flag} onChange={e => setNewLang({...newLang, flag: e.target.value})} placeholder="🇸🇳" />
               </div>
               <div>
                 <Label>{t('direction')}</Label>
-                <Select defaultValue="ltr">
+                <Select value={newLang.direction} onValueChange={v => setNewLang({...newLang, direction: v})}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ltr">LTR</SelectItem>
@@ -449,13 +560,16 @@ const LanguagesModule: React.FC = () => {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowAddDialog(false)}>{t('cancel')}</Button>
-              <Button onClick={() => setShowAddDialog(false)}>{t('save')}</Button>
+              <Button onClick={handleAddLanguage} disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {t('save')}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Edit Translation Dialog */}
-        <Dialog open={!!editingTranslation} onOpenChange={() => setEditingTranslation(null)}>
+        <Dialog open={!!editingTranslation} onOpenChange={(open) => !open && setEditingTranslation(null)}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>
@@ -466,25 +580,28 @@ const LanguagesModule: React.FC = () => {
               <div className="space-y-3">
                 <div>
                   <Label>🇫🇷 Français</Label>
-                  <Input defaultValue={editingTranslation.fr} />
+                  <Input value={editingTranslation.fr} onChange={e => setEditingTranslation({...editingTranslation, fr: e.target.value})} />
                 </div>
                 <div>
                   <Label>🇬🇧 English</Label>
-                  <Input defaultValue={editingTranslation.en} />
+                  <Input value={editingTranslation.en} onChange={e => setEditingTranslation({...editingTranslation, en: e.target.value})} />
                 </div>
                 <div>
                   <Label>🇵🇹 Português</Label>
-                  <Input defaultValue={editingTranslation.pt} />
+                  <Input value={editingTranslation.pt} onChange={e => setEditingTranslation({...editingTranslation, pt: e.target.value})} />
                 </div>
                 <div>
                   <Label>🇸🇦 العربية</Label>
-                  <Input defaultValue={editingTranslation.ar} dir="rtl" />
+                  <Input value={editingTranslation.ar} onChange={e => setEditingTranslation({...editingTranslation, ar: e.target.value})} dir="rtl" />
                 </div>
               </div>
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setEditingTranslation(null)}>{t('cancel')}</Button>
-              <Button onClick={() => setEditingTranslation(null)}>{t('save')}</Button>
+              <Button onClick={handleSaveTranslation} disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {t('save')}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

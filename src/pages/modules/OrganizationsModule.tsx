@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import type { Lang } from '@/i18n/translations';
@@ -15,9 +15,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import {
   Building, Plus, Search, Users, MapPin, Activity, Settings,
   CheckCircle, Clock, XCircle, Trash2, Edit, Eye, Baby,
-  Stethoscope, Globe, TrendingUp, Mail, Phone, Shield, Layers,
+  Stethoscope, Globe, TrendingUp, Mail, Phone, Shield, Layers, Loader2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
 
 const tt = (map: Record<Lang, string>, lang: Lang) => map[lang] || map.fr;
 
@@ -63,20 +64,14 @@ const statusConfig = {
   pending: { label: { fr: 'En attente', en: 'Pending', pt: 'Pendente', ar: 'قيد الانتظار' }, variant: 'outline' as const, icon: Clock },
 };
 
-const initialOrgs: Organization[] = [
-  { id: '1', name: 'CHU de Cocody', type: 'hospital', country: "Côte d'Ivoire", countryFlag: '🇨🇮', status: 'active', regions: 3, structures: 12, professionals: 45, children: 2800, coverage: 72, email: 'admin@chu-cocody.ci', phone: '+225 27 22 44 91 00', director: 'Pr. Aka Kouamé', createdAt: '2024-01-15', plan: 'enterprise', modules: ['screening', 'adhd', 'autism', 'care-plans', 'teleconsultation'] },
-  { id: '2', name: 'ONG Santé Pour Tous', type: 'ngo', country: "Côte d'Ivoire", countryFlag: '🇨🇮', status: 'active', regions: 5, structures: 18, professionals: 32, children: 1950, coverage: 58, email: 'contact@spt.org', phone: '+225 07 08 09 10 11', director: 'Dr. Aminata Coulibaly', createdAt: '2024-03-20', plan: 'premium', modules: ['screening', 'community', 'families', 'orientation'] },
-  { id: '3', name: 'Hôpital Principal de Dakar', type: 'hospital', country: 'Sénégal', countryFlag: '🇸🇳', status: 'active', regions: 2, structures: 8, professionals: 28, children: 1600, coverage: 65, email: 'admin@hpd.sn', phone: '+221 33 839 50 00', director: 'Dr. Moussa Ndiaye', createdAt: '2024-06-01', plan: 'enterprise', modules: ['screening', 'adhd', 'autism', 'appointments'] },
-  { id: '4', name: 'Fondation Autisme Maroc', type: 'association', country: 'Maroc', countryFlag: '🇲🇦', status: 'active', regions: 2, structures: 6, professionals: 15, children: 850, coverage: 45, email: 'info@fam.ma', phone: '+212 5 22 36 12 00', director: 'Dr. Fatima Zahra', createdAt: '2025-01-10', plan: 'standard', modules: ['screening', 'autism', 'guidance'] },
-  { id: '5', name: 'Université de Yaoundé I', type: 'university', country: 'Cameroun', countryFlag: '🇨🇲', status: 'pending', regions: 1, structures: 3, professionals: 8, children: 420, coverage: 22, email: 'recherche@uy1.cm', phone: '+237 2 22 22 13 20', director: 'Pr. Jean-Paul Mbarga', createdAt: '2025-09-01', plan: 'standard', modules: ['screening', 'training'] },
-  { id: '6', name: 'Clinique Pédiatrique Abidjan', type: 'clinic', country: "Côte d'Ivoire", countryFlag: '🇨🇮', status: 'suspended', regions: 1, structures: 2, professionals: 6, children: 320, coverage: 30, email: 'info@cpa.ci', phone: '+225 27 22 55 00 00', director: 'Dr. Kouadio Yapi', createdAt: '2024-08-15', plan: 'free', modules: ['screening'] },
-  { id: '7', name: 'Ministère de la Santé CI', type: 'ministry', country: "Côte d'Ivoire", countryFlag: '🇨🇮', status: 'active', regions: 14, structures: 45, professionals: 120, children: 8500, coverage: 68, email: 'dpe@sante.gouv.ci', phone: '+225 27 20 21 09 10', director: 'Dr. N\'Guessan Koffi', createdAt: '2024-01-01', plan: 'enterprise', modules: ['indicators', 'mapping', 'reporting', 'structures', 'export'] },
-];
-
 const OrganizationsModule: React.FC = () => {
   const { lang } = useLanguage();
   const { toast } = useToast();
-  const [orgs, setOrgs] = useState<Organization[]>(initialOrgs);
+  
+  const [orgs, setOrgs] = useState<Organization[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -85,6 +80,46 @@ const OrganizationsModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState('list');
   const [detailTab, setDetailTab] = useState('overview');
   const [newOrg, setNewOrg] = useState({ name: '', type: 'hospital', email: '', phone: '', director: '', country: '', plan: 'standard' });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchOrganizations = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('organizations').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      
+      if (data) {
+        const formatted: Organization[] = data.map(o => ({
+          id: o.id,
+          name: o.name,
+          type: o.type as any,
+          country: o.country,
+          countryFlag: o.country_flag,
+          status: o.status as any,
+          regions: o.regions,
+          structures: o.structures,
+          professionals: o.professionals,
+          children: o.children,
+          coverage: o.coverage,
+          email: o.email || '',
+          phone: o.phone || '',
+          director: o.director || '',
+          createdAt: new Date(o.created_at).toLocaleDateString(lang === 'ar' ? 'ar-SA' : lang === 'en' ? 'en-US' : 'fr-FR'),
+          plan: o.plan as any,
+          modules: o.modules || []
+        }));
+        setOrgs(formatted);
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les organisations.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrganizations();
+  }, [lang]);
 
   const labels = {
     title: { fr: 'Gestion des organisations', en: 'Organization Management', pt: 'Gestão de organizações', ar: 'إدارة المنظمات' },
@@ -150,32 +185,65 @@ const OrganizationsModule: React.FC = () => {
 
   const childrenByOrg = orgs.filter(o => o.children > 0).map(o => ({ name: o.name.length > 20 ? o.name.slice(0, 20) + '…' : o.name, children: o.children })).sort((a, b) => b.children - a.children);
 
-  const handleCreate = () => {
+  // --- 2. CRÉATION EN DB ---
+  const handleCreate = async () => {
     if (!newOrg.name) return;
-    const org: Organization = {
-      id: Date.now().toString(), name: newOrg.name, type: newOrg.type as Organization['type'],
-      country: newOrg.country || "Côte d'Ivoire", countryFlag: '🏳️', status: 'pending',
-      regions: 0, structures: 0, professionals: 0, children: 0, coverage: 0,
-      email: newOrg.email, phone: newOrg.phone, director: newOrg.director,
-      createdAt: new Date().toISOString().split('T')[0],
-      plan: newOrg.plan as Organization['plan'], modules: [],
-    };
-    setOrgs(prev => [...prev, org]);
-    setShowCreateDialog(false);
-    setNewOrg({ name: '', type: 'hospital', email: '', phone: '', director: '', country: '', plan: 'standard' });
-    toast({ title: tt({ fr: 'Organisation ajoutée', en: 'Organization added', pt: 'Organização adicionada', ar: 'تمت إضافة المنظمة' }, lang) });
+    setIsSubmitting(true);
+    
+    try {
+      const payload = {
+        name: newOrg.name,
+        type: newOrg.type,
+        country: newOrg.country || "Côte d'Ivoire",
+        country_flag: '🏳️',
+        status: 'pending',
+        email: newOrg.email,
+        phone: newOrg.phone,
+        director: newOrg.director,
+        plan: newOrg.plan
+      };
+
+      const { error } = await supabase.from('organizations').insert([payload]);
+      if (error) throw error;
+
+      setShowCreateDialog(false);
+      setNewOrg({ name: '', type: 'hospital', email: '', phone: '', director: '', country: '', plan: 'standard' });
+      toast({ title: tt({ fr: 'Organisation ajoutée', en: 'Organization added', pt: 'Organização adicionada', ar: 'تمت إضافة المنظمة' }, lang) });
+      fetchOrganizations();
+
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleStatusChange = (id: string, status: Organization['status']) => {
-    setOrgs(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    if (selectedOrg?.id === id) setSelectedOrg(prev => prev ? { ...prev, status } : null);
-    toast({ title: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
+  // --- 3. MISE À JOUR DU STATUT ---
+  const handleStatusChange = async (id: string, status: Organization['status']) => {
+    try {
+      const { error } = await supabase.from('organizations').update({ status }).eq('id', id);
+      if (error) throw error;
+
+      setOrgs(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+      if (selectedOrg?.id === id) setSelectedOrg(prev => prev ? { ...prev, status } : null);
+      toast({ title: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setOrgs(prev => prev.filter(o => o.id !== id));
-    if (selectedOrg?.id === id) setSelectedOrg(null);
-    toast({ title: tt({ fr: 'Organisation supprimée', en: 'Organization deleted', pt: 'Organização excluída', ar: 'تم حذف المنظمة' }, lang) });
+  // --- 4. SUPPRESSION ---
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('organizations').delete().eq('id', id);
+      if (error) throw error;
+
+      setOrgs(prev => prev.filter(o => o.id !== id));
+      if (selectedOrg?.id === id) setSelectedOrg(null);
+      toast({ title: tt({ fr: 'Organisation supprimée', en: 'Organization deleted', pt: 'Organização excluída', ar: 'تم حذف المنظمة' }, lang) });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   };
 
   return (
@@ -246,160 +314,166 @@ const OrganizationsModule: React.FC = () => {
               </Select>
             </div>
 
-            <div className="flex gap-6">
-              <div className={`space-y-3 transition-all ${selectedOrg ? 'w-1/2' : 'w-full'}`}>
-                {filtered.map(org => {
-                  const cfg = statusConfig[org.status];
-                  const StatusIcon = cfg.icon;
-                  const isSelected = selectedOrg?.id === org.id;
-                  return (
-                    <Card key={org.id} className={`cursor-pointer transition-all hover:border-primary/30 ${isSelected ? 'border-primary ring-1 ring-primary/20' : ''}`} onClick={() => { setSelectedOrg(org); setDetailTab('overview'); }}>
-                      <CardContent className="py-4">
-                        <div className="flex items-center gap-4">
-                          <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                            <Building className="h-5 w-5 text-primary" />
+            {isLoading ? (
+               <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            ) : (
+              <div className="flex gap-6">
+                <div className={`space-y-3 transition-all ${selectedOrg ? 'w-1/2' : 'w-full'}`}>
+                  {filtered.length === 0 ? (
+                    <Card><CardContent className="p-8 text-center text-muted-foreground"><Building className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>Aucune organisation trouvée.</p></CardContent></Card>
+                  ) : filtered.map(org => {
+                    const cfg = statusConfig[org.status];
+                    const StatusIcon = cfg.icon;
+                    const isSelected = selectedOrg?.id === org.id;
+                    return (
+                      <Card key={org.id} className={`cursor-pointer transition-all hover:border-primary/30 ${isSelected ? 'border-primary ring-1 ring-primary/20' : ''}`} onClick={() => { setSelectedOrg(org); setDetailTab('overview'); }}>
+                        <CardContent className="py-4">
+                          <div className="flex items-center gap-4">
+                            <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                              <Building className="h-5 w-5 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="font-semibold text-sm truncate">{org.name}</span>
+                                <Badge variant="outline" className="text-[10px]">{tt(orgTypes[org.type], lang)}</Badge>
+                                <Badge variant={cfg.variant} className="gap-1 text-[10px]"><StatusIcon className="h-3 w-3" />{tt(cfg.label, lang)}</Badge>
+                                <span className="text-xs text-muted-foreground">{org.countryFlag} {org.country}</span>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1"><Users className="h-3 w-3" />{org.professionals}</span>
+                                <span className="flex items-center gap-1"><Baby className="h-3 w-3" />{org.children.toLocaleString()}</span>
+                                <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{org.structures}</span>
+                                <Badge variant="outline" className="text-[9px] h-4" style={{ borderColor: planConfig[org.plan].color, color: planConfig[org.plan].color }}>{planConfig[org.plan].label}</Badge>
+                              </div>
+                            </div>
+                            {org.coverage > 0 && (
+                              <div className="w-14 shrink-0 text-right">
+                                <div className="text-xs font-medium text-muted-foreground mb-1">{org.coverage}%</div>
+                                <Progress value={org.coverage} className="h-1.5" />
+                              </div>
+                            )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <span className="font-semibold text-sm truncate">{org.name}</span>
-                              <Badge variant="outline" className="text-[10px]">{tt(orgTypes[org.type], lang)}</Badge>
-                              <Badge variant={cfg.variant} className="gap-1 text-[10px]"><StatusIcon className="h-3 w-3" />{tt(cfg.label, lang)}</Badge>
-                              <span className="text-xs text-muted-foreground">{org.countryFlag} {org.country}</span>
-                            </div>
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                              <span className="flex items-center gap-1"><Users className="h-3 w-3" />{org.professionals}</span>
-                              <span className="flex items-center gap-1"><Baby className="h-3 w-3" />{org.children.toLocaleString()}</span>
-                              <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{org.structures}</span>
-                              <Badge variant="outline" className="text-[9px] h-4" style={{ borderColor: planConfig[org.plan].color, color: planConfig[org.plan].color }}>{planConfig[org.plan].label}</Badge>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                {/* Detail panel */}
+                {selectedOrg && (
+                  <div className="w-1/2 space-y-4">
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center"><Building className="h-6 w-6 text-primary" /></div>
+                            <div>
+                              <CardTitle className="text-lg">{selectedOrg.name}</CardTitle>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="outline">{tt(orgTypes[selectedOrg.type], lang)}</Badge>
+                                <Badge variant={statusConfig[selectedOrg.status].variant}>{tt(statusConfig[selectedOrg.status].label, lang)}</Badge>
+                                <Badge variant="outline" style={{ borderColor: planConfig[selectedOrg.plan].color, color: planConfig[selectedOrg.plan].color }}>{planConfig[selectedOrg.plan].label}</Badge>
+                              </div>
                             </div>
                           </div>
-                          {org.coverage > 0 && (
-                            <div className="w-14 shrink-0 text-right">
-                              <div className="text-xs font-medium text-muted-foreground mb-1">{org.coverage}%</div>
-                              <Progress value={org.coverage} className="h-1.5" />
-                            </div>
-                          )}
+                          <Button variant="ghost" size="icon" onClick={() => setSelectedOrg(null)}><XCircle className="h-4 w-4" /></Button>
                         </div>
+                      </CardHeader>
+                      <CardContent>
+                        <Tabs value={detailTab} onValueChange={setDetailTab}>
+                          <TabsList className="w-full">
+                            <TabsTrigger value="overview" className="flex-1 text-xs">{tt(labels.overview, lang)}</TabsTrigger>
+                            <TabsTrigger value="modules" className="flex-1 text-xs">{tt(labels.modules, lang)}</TabsTrigger>
+                            <TabsTrigger value="config" className="flex-1 text-xs">{tt(labels.config, lang)}</TabsTrigger>
+                          </TabsList>
+
+                          <TabsContent value="overview" className="mt-4 space-y-4">
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              {[
+                                { label: labels.director, value: selectedOrg.director, icon: Users },
+                                { label: labels.country, value: `${selectedOrg.countryFlag} ${selectedOrg.country}`, icon: Globe },
+                                { label: labels.email, value: selectedOrg.email, icon: Mail },
+                                { label: labels.phone, value: selectedOrg.phone, icon: Phone },
+                              ].map((field, i) => {
+                                const Icon = field.icon;
+                                return (
+                                  <div key={i} className="bg-muted/30 rounded-lg p-3">
+                                    <div className="flex items-center gap-1.5 text-muted-foreground text-xs mb-0.5"><Icon className="h-3 w-3" />{tt(field.label, lang)}</div>
+                                    <div className="font-medium text-xs truncate">{field.value || '—'}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              {[
+                                { label: labels.regions, value: selectedOrg.regions, icon: MapPin },
+                                { label: labels.structures, value: selectedOrg.structures, icon: Building },
+                                { label: labels.professionals, value: selectedOrg.professionals, icon: Stethoscope },
+                                { label: labels.children, value: selectedOrg.children.toLocaleString(), icon: Baby },
+                              ].map((stat, i) => {
+                                const Icon = stat.icon;
+                                return (
+                                  <div key={i} className="flex items-center gap-2 p-3 rounded-lg border border-border">
+                                    <Icon className="h-4 w-4 text-primary" />
+                                    <div>
+                                      <div className="font-bold text-sm">{stat.value}</div>
+                                      <div className="text-[10px] text-muted-foreground">{tt(stat.label, lang)}</div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {selectedOrg.coverage > 0 && (
+                              <div>
+                                <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">{tt(labels.coverage, lang)}</span><span className="font-medium">{selectedOrg.coverage}%</span></div>
+                                <Progress value={selectedOrg.coverage} className="h-2.5" />
+                              </div>
+                            )}
+                          </TabsContent>
+
+                          <TabsContent value="modules" className="mt-4">
+                            <div className="space-y-2">
+                              <p className="text-xs text-muted-foreground mb-3">{tt(labels.activeModules, lang)} ({selectedOrg.modules.length})</p>
+                              {selectedOrg.modules.length > 0 ? selectedOrg.modules.map((mod, i) => (
+                                <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/30">
+                                  <Layers className="h-4 w-4 text-primary" />
+                                  <span className="text-sm font-medium capitalize">{mod.replace('-', ' ')}</span>
+                                  <Badge variant="default" className="ml-auto text-[10px]">{tt({ fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, lang)}</Badge>
+                                </div>
+                              )) : (
+                                <p className="text-sm text-muted-foreground text-center py-4">{tt({ fr: 'Aucun module activé', en: 'No active modules', pt: 'Nenhum módulo ativo', ar: 'لا توجد وحدات نشطة' }, lang)}</p>
+                              )}
+                            </div>
+                          </TabsContent>
+
+                          <TabsContent value="config" className="mt-4 space-y-3">
+                            <div className="bg-muted/30 rounded-lg p-3 text-sm">
+                              <div className="text-muted-foreground text-xs">{tt(labels.createdAt, lang)}</div>
+                              <div className="font-medium mt-0.5">{selectedOrg.createdAt}</div>
+                            </div>
+                            <div className="bg-muted/30 rounded-lg p-3 text-sm">
+                              <div className="text-muted-foreground text-xs">{tt(labels.plan, lang)}</div>
+                              <div className="font-medium mt-0.5" style={{ color: planConfig[selectedOrg.plan].color }}>{planConfig[selectedOrg.plan].label}</div>
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                              {selectedOrg.status !== 'active' && (
+                                <Button size="sm" onClick={() => handleStatusChange(selectedOrg.id, 'active')} className="gap-1"><CheckCircle className="h-3.5 w-3.5" />{tt(labels.activate, lang)}</Button>
+                              )}
+                              {selectedOrg.status === 'active' && (
+                                <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedOrg.id, 'suspended')} className="gap-1"><XCircle className="h-3.5 w-3.5" />{tt(labels.suspend, lang)}</Button>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => handleDelete(selectedOrg.id)} className="text-destructive gap-1"><Trash2 className="h-3.5 w-3.5" />{tt(labels.delete, lang)}</Button>
+                            </div>
+                          </TabsContent>
+                        </Tabs>
                       </CardContent>
                     </Card>
-                  );
-                })}
+                  </div>
+                )}
               </div>
-
-              {/* Detail panel */}
-              {selectedOrg && (
-                <div className="w-1/2 space-y-4">
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center"><Building className="h-6 w-6 text-primary" /></div>
-                          <div>
-                            <CardTitle className="text-lg">{selectedOrg.name}</CardTitle>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Badge variant="outline">{tt(orgTypes[selectedOrg.type], lang)}</Badge>
-                              <Badge variant={statusConfig[selectedOrg.status].variant}>{tt(statusConfig[selectedOrg.status].label, lang)}</Badge>
-                              <Badge variant="outline" style={{ borderColor: planConfig[selectedOrg.plan].color, color: planConfig[selectedOrg.plan].color }}>{planConfig[selectedOrg.plan].label}</Badge>
-                            </div>
-                          </div>
-                        </div>
-                        <Button variant="ghost" size="icon" onClick={() => setSelectedOrg(null)}><XCircle className="h-4 w-4" /></Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <Tabs value={detailTab} onValueChange={setDetailTab}>
-                        <TabsList className="w-full">
-                          <TabsTrigger value="overview" className="flex-1 text-xs">{tt(labels.overview, lang)}</TabsTrigger>
-                          <TabsTrigger value="modules" className="flex-1 text-xs">{tt(labels.modules, lang)}</TabsTrigger>
-                          <TabsTrigger value="config" className="flex-1 text-xs">{tt(labels.config, lang)}</TabsTrigger>
-                        </TabsList>
-
-                        <TabsContent value="overview" className="mt-4 space-y-4">
-                          <div className="grid grid-cols-2 gap-3 text-sm">
-                            {[
-                              { label: labels.director, value: selectedOrg.director, icon: Users },
-                              { label: labels.country, value: `${selectedOrg.countryFlag} ${selectedOrg.country}`, icon: Globe },
-                              { label: labels.email, value: selectedOrg.email, icon: Mail },
-                              { label: labels.phone, value: selectedOrg.phone, icon: Phone },
-                            ].map((field, i) => {
-                              const Icon = field.icon;
-                              return (
-                                <div key={i} className="bg-muted/30 rounded-lg p-3">
-                                  <div className="flex items-center gap-1.5 text-muted-foreground text-xs mb-0.5"><Icon className="h-3 w-3" />{tt(field.label, lang)}</div>
-                                  <div className="font-medium text-xs truncate">{field.value || '—'}</div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3">
-                            {[
-                              { label: labels.regions, value: selectedOrg.regions, icon: MapPin },
-                              { label: labels.structures, value: selectedOrg.structures, icon: Building },
-                              { label: labels.professionals, value: selectedOrg.professionals, icon: Stethoscope },
-                              { label: labels.children, value: selectedOrg.children.toLocaleString(), icon: Baby },
-                            ].map((stat, i) => {
-                              const Icon = stat.icon;
-                              return (
-                                <div key={i} className="flex items-center gap-2 p-3 rounded-lg border border-border">
-                                  <Icon className="h-4 w-4 text-primary" />
-                                  <div>
-                                    <div className="font-bold text-sm">{stat.value}</div>
-                                    <div className="text-[10px] text-muted-foreground">{tt(stat.label, lang)}</div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {selectedOrg.coverage > 0 && (
-                            <div>
-                              <div className="flex justify-between text-xs mb-1"><span className="text-muted-foreground">{tt(labels.coverage, lang)}</span><span className="font-medium">{selectedOrg.coverage}%</span></div>
-                              <Progress value={selectedOrg.coverage} className="h-2.5" />
-                            </div>
-                          )}
-                        </TabsContent>
-
-                        <TabsContent value="modules" className="mt-4">
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground mb-3">{tt(labels.activeModules, lang)} ({selectedOrg.modules.length})</p>
-                            {selectedOrg.modules.length > 0 ? selectedOrg.modules.map((mod, i) => (
-                              <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/30">
-                                <Layers className="h-4 w-4 text-primary" />
-                                <span className="text-sm font-medium capitalize">{mod.replace('-', ' ')}</span>
-                                <Badge variant="default" className="ml-auto text-[10px]">{tt({ fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, lang)}</Badge>
-                              </div>
-                            )) : (
-                              <p className="text-sm text-muted-foreground text-center py-4">{tt({ fr: 'Aucun module activé', en: 'No active modules', pt: 'Nenhum módulo ativo', ar: 'لا توجد وحدات نشطة' }, lang)}</p>
-                            )}
-                          </div>
-                        </TabsContent>
-
-                        <TabsContent value="config" className="mt-4 space-y-3">
-                          <div className="bg-muted/30 rounded-lg p-3 text-sm">
-                            <div className="text-muted-foreground text-xs">{tt(labels.createdAt, lang)}</div>
-                            <div className="font-medium mt-0.5">{selectedOrg.createdAt}</div>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-3 text-sm">
-                            <div className="text-muted-foreground text-xs">{tt(labels.plan, lang)}</div>
-                            <div className="font-medium mt-0.5" style={{ color: planConfig[selectedOrg.plan].color }}>{planConfig[selectedOrg.plan].label}</div>
-                          </div>
-                          <div className="flex gap-2 pt-2">
-                            {selectedOrg.status !== 'active' && (
-                              <Button size="sm" onClick={() => handleStatusChange(selectedOrg.id, 'active')} className="gap-1"><CheckCircle className="h-3.5 w-3.5" />{tt(labels.activate, lang)}</Button>
-                            )}
-                            {selectedOrg.status === 'active' && (
-                              <Button size="sm" variant="outline" onClick={() => handleStatusChange(selectedOrg.id, 'suspended')} className="gap-1"><XCircle className="h-3.5 w-3.5" />{tt(labels.suspend, lang)}</Button>
-                            )}
-                            <Button size="sm" variant="ghost" onClick={() => handleDelete(selectedOrg.id)} className="text-destructive gap-1"><Trash2 className="h-3.5 w-3.5" />{tt(labels.delete, lang)}</Button>
-                          </div>
-                        </TabsContent>
-                      </Tabs>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
+            )}
           </TabsContent>
 
           {/* ANALYTICS */}
@@ -481,7 +555,10 @@ const OrganizationsModule: React.FC = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>{tt(labels.cancel, lang)}</Button>
-            <Button onClick={handleCreate}>{tt(labels.save, lang)}</Button>
+            <Button onClick={handleCreate} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {tt(labels.save, lang)}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

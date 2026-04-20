@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext'; // <-- AJOUT
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -15,8 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Monitor, Search, Plus, CheckCircle2, Clock, AlertTriangle, XCircle,
   MessageSquare, Headphones, Server, Cpu, HardDrive, Wifi, Activity,
-  RefreshCw, Eye, User, Calendar, ArrowUp, ArrowDown, Minus
+  RefreshCw, Eye, User, Calendar, ArrowUp, ArrowDown, Minus, Loader2 // <-- AJOUT Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 const labels: Record<string, Record<string, string>> = {
   title: { fr: 'Support & Monitoring', en: 'Support & Monitoring', pt: 'Suporte e Monitoramento', ar: 'الدعم والمراقبة' },
@@ -89,7 +92,13 @@ interface ServiceStatus {
 
 const SupportModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { user } = useAuth();
+  const { toast } = useToast();
   const t = (key: string) => labels[key]?.[lang] || labels[key]?.['fr'] || key;
+
+  const [tickets, setTickets] = useState<Ticket[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -97,15 +106,79 @@ const SupportModule: React.FC = () => {
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
-  const tickets: Ticket[] = [
-    { id: 'TK-001', subject: 'Erreur export PDF rapports mensuels', description: 'L\'export échoue avec une erreur 500', priority: 'high', status: 'open', category: 'Bug', reporter: 'Dr. Koné Aminata', organization: 'CSC Abobo', date: '2026-03-11', lastUpdate: '2026-03-11 14:00' },
-    { id: 'TK-002', subject: 'Lenteur module dépistage ASQ-3', description: 'Temps de chargement > 10s', priority: 'medium', status: 'in_progress', category: 'Performance', reporter: 'Coord. Bamba Aïcha', organization: 'Programme National', date: '2026-03-10', lastUpdate: '2026-03-11 10:30' },
-    { id: 'TK-003', subject: 'Impossible de créer un nouveau patient', description: 'Formulaire bloqué après validation', priority: 'critical', status: 'open', category: 'Bug', reporter: 'Dr. Ouattara Ibrahim', organization: 'CHU Cocody', date: '2026-03-10', lastUpdate: '2026-03-10 16:45' },
-    { id: 'TK-004', subject: 'Demande d\'ajout langue Wolof', description: 'Support multilingue Wolof pour le Sénégal', priority: 'low', status: 'in_progress', category: 'Feature', reporter: 'Admin Sénégal', organization: 'Bureau Dakar', date: '2026-03-08', lastUpdate: '2026-03-09 09:00' },
-    { id: 'TK-005', subject: 'Notifications email non reçues', description: 'Parents ne reçoivent plus les rappels RDV', priority: 'high', status: 'resolved', category: 'Bug', reporter: 'Mme Touré Fatoumata', organization: 'CSC Abobo', date: '2026-03-07', lastUpdate: '2026-03-09 11:20' },
-    { id: 'TK-006', subject: 'Formation en ligne - vidéo ne charge pas', description: 'Module formation - erreur lecteur vidéo', priority: 'medium', status: 'closed', category: 'Bug', reporter: 'Prof. Diarra Moussa', organization: 'École Plateau', date: '2026-03-05', lastUpdate: '2026-03-07 14:00' },
-  ];
+  const [newTicket, setNewTicket] = useState({ subject: '', priority: 'medium' as Priority, category: 'bug', description: '' });
 
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchTickets = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+
+      if (data) {
+        const formatted: Ticket[] = data.map(tk => ({
+          id: tk.id,
+          subject: tk.subject,
+          description: tk.description,
+          priority: tk.priority as Priority,
+          status: tk.status as TicketStatus,
+          category: tk.category,
+          reporter: tk.reporter_name,
+          organization: tk.organization,
+          date: new Date(tk.created_at).toLocaleDateString(lang === 'ar' ? 'ar-SA' : lang === 'en' ? 'en-US' : 'fr-FR'),
+          lastUpdate: new Date(tk.updated_at).toLocaleString(lang === 'ar' ? 'ar-SA' : lang === 'en' ? 'en-US' : 'fr-FR')
+        }));
+        setTickets(formatted);
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les tickets.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTickets();
+  }, [lang]);
+
+  // --- 2. CRÉATION EN DB ---
+  const handleCreateTicket = async () => {
+    if (!newTicket.subject.trim() || !newTicket.description.trim()) {
+      toast({ title: "Attention", description: "Veuillez remplir le sujet et la description.", variant: "destructive" });
+      return;
+    }
+    
+    setIsSubmitting(true);
+    try {
+      // Générer un ID unique (format TK-XXX)
+      const tkId = `TK-${Math.floor(100 + Math.random() * 900)}`;
+
+      const payload = {
+        id: tkId,
+        subject: newTicket.subject,
+        description: newTicket.description,
+        priority: newTicket.priority,
+        status: 'open',
+        category: newTicket.category,
+        reporter_id: user?.id,
+        reporter_name: user?.firstName ? `${user.firstName} ${user.lastName}` : 'Utilisateur Inconnu',
+      };
+
+      const { error } = await supabase.from('support_tickets').insert([payload]);
+      if (error) throw error;
+
+      toast({ title: "Succès", description: "Votre ticket a été créé." });
+      setNewTicket({ subject: '', priority: 'medium', category: 'bug', description: '' });
+      setShowNewTicket(false);
+      fetchTickets();
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Les données de monitoring restent en dur car elles simulent une infra serveur
   const services: ServiceStatus[] = [
     { name: 'API Gateway', status: 'healthy', uptime: 99.98, latency: 45, icon: <Server className="h-5 w-5" /> },
     { name: 'Database', status: 'healthy', uptime: 99.95, latency: 12, icon: <HardDrive className="h-5 w-5" /> },
@@ -181,8 +254,8 @@ const SupportModule: React.FC = () => {
             <p className="text-muted-foreground mt-1">{t('subtitle')}</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-1" /> {t('refresh')}
+            <Button variant="outline" size="sm" onClick={fetchTickets} disabled={isLoading}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? 'animate-spin' : ''}`} /> {t('refresh')}
             </Button>
             <Button size="sm" onClick={() => setShowNewTicket(true)}>
               <Plus className="h-4 w-4 mr-1" /> {t('newTicket')}
@@ -262,45 +335,53 @@ const SupportModule: React.FC = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('id')}</TableHead>
-                      <TableHead>{t('subject')}</TableHead>
-                      <TableHead>{t('priority')}</TableHead>
-                      <TableHead>{t('status')}</TableHead>
-                      <TableHead>{t('category')}</TableHead>
-                      <TableHead>{t('reporter')}</TableHead>
-                      <TableHead>{t('date')}</TableHead>
-                      <TableHead>{t('actions')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTickets.map(ticket => (
-                      <TableRow key={ticket.id} className="cursor-pointer" onClick={() => setSelectedTicket(ticket)}>
-                        <TableCell className="font-mono font-bold text-foreground">{ticket.id}</TableCell>
-                        <TableCell className="text-foreground max-w-[200px] truncate">{ticket.subject}</TableCell>
-                        <TableCell>
-                          <Badge variant={priorityConfig[ticket.priority].variant} className="gap-1">
-                            {priorityConfig[ticket.priority].icon}
-                            {t(ticket.priority)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={statusConfig[ticket.status].variant}>
-                            {statusLabels[ticket.status]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell><Badge variant="outline">{ticket.category}</Badge></TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{ticket.reporter}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{ticket.date}</TableCell>
-                        <TableCell>
-                          <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                        </TableCell>
+                {isLoading ? (
+                  <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('id')}</TableHead>
+                        <TableHead>{t('subject')}</TableHead>
+                        <TableHead>{t('priority')}</TableHead>
+                        <TableHead>{t('status')}</TableHead>
+                        <TableHead>{t('category')}</TableHead>
+                        <TableHead>{t('reporter')}</TableHead>
+                        <TableHead>{t('date')}</TableHead>
+                        <TableHead>{t('actions')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTickets.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center py-6 text-muted-foreground">Aucun ticket trouvé.</TableCell>
+                        </TableRow>
+                      ) : filteredTickets.map(ticket => (
+                        <TableRow key={ticket.id} className="cursor-pointer" onClick={() => setSelectedTicket(ticket)}>
+                          <TableCell className="font-mono font-bold text-foreground">{ticket.id}</TableCell>
+                          <TableCell className="text-foreground max-w-[200px] truncate">{ticket.subject}</TableCell>
+                          <TableCell>
+                            <Badge variant={priorityConfig[ticket.priority].variant} className="gap-1">
+                              {priorityConfig[ticket.priority].icon}
+                              {t(ticket.priority)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={statusConfig[ticket.status].variant}>
+                              {statusLabels[ticket.status]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell><Badge variant="outline">{ticket.category}</Badge></TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{ticket.reporter}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{ticket.date}</TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -372,10 +453,13 @@ const SupportModule: React.FC = () => {
           <DialogContent>
             <DialogHeader><DialogTitle>{t('newTicket')}</DialogTitle></DialogHeader>
             <div className="space-y-4">
-              <div><Label>{t('subject')}</Label><Input /></div>
+              <div>
+                <Label>{t('subject')}</Label>
+                <Input value={newTicket.subject} onChange={e => setNewTicket({...newTicket, subject: e.target.value})} />
+              </div>
               <div>
                 <Label>{t('priority')}</Label>
-                <Select defaultValue="medium">
+                <Select value={newTicket.priority} onValueChange={v => setNewTicket({...newTicket, priority: v as Priority})}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="critical">{t('critical')}</SelectItem>
@@ -387,7 +471,7 @@ const SupportModule: React.FC = () => {
               </div>
               <div>
                 <Label>{t('category')}</Label>
-                <Select defaultValue="bug">
+                <Select value={newTicket.category} onValueChange={v => setNewTicket({...newTicket, category: v})}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="bug">Bug</SelectItem>
@@ -397,17 +481,23 @@ const SupportModule: React.FC = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>{t('description')}</Label><Textarea rows={4} /></div>
+              <div>
+                <Label>{t('description')}</Label>
+                <Textarea rows={4} value={newTicket.description} onChange={e => setNewTicket({...newTicket, description: e.target.value})} />
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowNewTicket(false)}>{t('cancel')}</Button>
-              <Button onClick={() => setShowNewTicket(false)}>{t('save')}</Button>
+              <Button onClick={handleCreateTicket} disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {t('save')}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Ticket Detail Dialog */}
-        <Dialog open={!!selectedTicket} onOpenChange={() => setSelectedTicket(null)}>
+        <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && setSelectedTicket(null)}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">

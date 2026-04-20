@@ -67,7 +67,7 @@ const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* BOUTON : ESPACE AGENT (Desktop) - Dirige vers /login-agent */}
+          {/* BOUTON : ESPACE AGENT (Desktop) */}
           <Button 
             variant="ghost" 
             size="sm" 
@@ -80,13 +80,24 @@ const Navbar: React.FC = () => {
 
           {isAuthenticated ? (
             <>
-              <Button variant="outline" size="sm" className="border-white/30 text-white hover:bg-white/10" onClick={() => navigate('/dashboard')}>{t('nav.dashboard')}</Button>
+              {/* CORRECTION : Fond blanc avec texte bleu pour Tableau de Bord */}
+              <Button size="sm" className="bg-white text-[#0056A8] hover:bg-slate-100 font-bold shadow-sm" onClick={() => navigate('/dashboard')}>{t('nav.dashboard')}</Button>
               <Button variant="ghost" size="sm" className="text-white/70 hover:text-white hover:bg-white/10" onClick={logout}>{t('nav.logout')}</Button>
             </>
           ) : (
             <>
-              <Button variant="outline" size="sm" className="border-white/30 text-white hover:bg-white/10" onClick={() => navigate('/login')}>{t('nav.login')}</Button>
-              <Button size="sm" className="bg-[hsl(var(--accent))] hover:bg-[hsl(36,90%,48%)] text-white" onClick={() => navigate('/signup')}>{t('hero.cta.demo')}</Button>
+              {/* BOUTON : SE CONNECTER (Desktop) */}
+              <Button 
+                size="sm" 
+                className="bg-white text-[#00A3E0] hover:bg-slate-100 font-bold" 
+                onClick={() => navigate('/login')}
+              >
+                {t('nav.login')}
+              </Button>
+              {/* BOUTON INSCRIPTION MODIFIÉ ICI */}
+              <Button size="sm" className="bg-[hsl(var(--accent))] hover:bg-[hsl(36,90%,48%)] text-white font-bold" onClick={() => navigate('/signup')}>
+                Inscription
+              </Button>
             </>
           )}
         </div>
@@ -105,7 +116,7 @@ const Navbar: React.FC = () => {
           ))}
           
           <div className="flex gap-2 mt-3 pb-3 border-b border-white/10">
-            {/* BOUTON : ESPACE AGENT (Mobile) - Dirige vers /login-agent */}
+            {/* BOUTON : ESPACE AGENT (Mobile) */}
             <Button 
               variant="secondary" 
               size="sm" 
@@ -127,13 +138,24 @@ const Navbar: React.FC = () => {
           <div className="flex gap-2 mt-3">
             {isAuthenticated ? (
               <>
-                <Button variant="outline" size="sm" className="flex-1 border-white/30 text-white" onClick={() => { navigate('/dashboard'); setMobileOpen(false); }}>{t('nav.dashboard')}</Button>
-                <Button variant="ghost" size="sm" className="flex-1 text-white/70" onClick={() => { logout(); setMobileOpen(false); }}>{t('nav.logout')}</Button>
+                {/* CORRECTION MOBILE : Fond blanc et texte bleu pour lisibilité */}
+                <Button size="sm" className="flex-1 bg-white text-[#0056A8] hover:bg-slate-100 font-bold" onClick={() => { navigate('/dashboard'); setMobileOpen(false); }}>{t('nav.dashboard')}</Button>
+                <Button variant="ghost" size="sm" className="flex-1 text-white/70 hover:bg-white/10" onClick={() => { logout(); setMobileOpen(false); }}>{t('nav.logout')}</Button>
               </>
             ) : (
               <>
-                <Button variant="outline" size="sm" className="flex-1 border-white/30 text-white" onClick={() => { navigate('/login'); setMobileOpen(false); }}>{t('nav.login')}</Button>
-                <Button size="sm" className="flex-1 bg-[hsl(var(--accent))] text-white" onClick={() => { navigate('/signup'); setMobileOpen(false); }}>{t('nav.signup')}</Button>
+                {/* BOUTON : SE CONNECTER (Mobile) */}
+                <Button 
+                  size="sm" 
+                  className="flex-1 bg-white text-[#00A3E0] hover:bg-slate-100 font-bold" 
+                  onClick={() => { navigate('/login'); setMobileOpen(false); }}
+                >
+                  {t('nav.login')}
+                </Button>
+                {/* BOUTON INSCRIPTION (Mobile) */}
+                <Button size="sm" className="flex-1 bg-[hsl(var(--accent))] text-white font-bold" onClick={() => { navigate('/signup'); setMobileOpen(false); }}>
+                  Inscription
+                </Button>
               </>
             )}
           </div>

@@ -61,6 +61,9 @@ const ADHDModule: React.FC = () => {
 
     setIsSubmitting(true);
 
+    // Ajout backend uniquement : Calcul du score total pour les Dashboards
+    const totalScore = Object.values(answers).reduce((sum, current) => sum + current, 0);
+
     try {
       const { error } = await supabase.from('evaluations').insert([{
         professional_id: user?.id,
@@ -68,6 +71,7 @@ const ADHDModule: React.FC = () => {
         child_name: childName,
         child_age: parseInt(childAge),
         responses: answers,
+        score: totalScore, // Ajout du score ici
         created_at: new Date().toISOString()
       }]);
 

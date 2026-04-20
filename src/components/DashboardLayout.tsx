@@ -1,15 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { roleNavigation } from '@/config/roleNavigation';
-import { LogOut, Menu, Settings, User } from 'lucide-react';
-import type { Lang } from '@/i18n/translations';
+import { LogOut, Menu, User } from 'lucide-react';
 import nuriaLogo from '@/assets/nuria-logo.png';
+import { supabase } from '@/lib/supabase'; // <-- Ajout de Supabase
 
-const langLabels: Record<Lang, string> = { fr: 'FR', en: 'EN', pt: 'PT', ar: 'AR' };
-
-// Role-specific accent colors for sidebar header
+// Couleurs par rôle
 const roleAccentColors: Record<string, string> = {
   parent: 'from-blue-500 to-blue-600',
   professional: 'from-emerald-500 to-emerald-600',
@@ -27,6 +25,27 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // --- NOUVEAU : État pour stocker les langues actives depuis Supabase ---
+  const [activeLangs, setActiveLangs] = useState<{code: string, flag: string}[]>([
+    { code: 'fr', flag: '🇫🇷' },
+    { code: 'ar', flag: '🇸🇦' }
+  ]);
+
+  useEffect(() => {
+    const fetchActiveLangs = async () => {
+      const { data } = await supabase
+        .from('platform_languages')
+        .select('code, flag')
+        .eq('is_active', true); // On ne prend que les langues activées !
+      
+      if (data && data.length > 0) {
+        setActiveLangs(data);
+      }
+    };
+    fetchActiveLangs();
+  }, []);
+  // ------------------------------------------------------------------------
 
   if (!user) {
     navigate('/login');
@@ -51,7 +70,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             </div>
           </div>
 
-          {/* Role-specific navigation */}
+          {/* Navigation par rôle */}
           <nav className="flex-1 overflow-y-auto p-3 space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -70,8 +89,8 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             })}
           </nav>
 
-          {/* Bottom section */}
-          <div className="p-3 border-t border-sidebar-border space-y-2">
+          {/* Bottom section (Profil & Langues) */}
+          <div className="p-3 border-t border-sidebar-border space-y-3">
             <Link
               to="/dashboard/profile"
               className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
@@ -79,13 +98,21 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
               <User className="h-4 w-4" />
               {t('sidebar.profile')}
             </Link>
-            <div className="flex gap-1">
-              {(Object.keys(langLabels) as Lang[]).map((l) => (
-                <button key={l} onClick={() => setLang(l)} className={`px-2 py-1 text-xs rounded ${lang === l ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground/50 hover:text-sidebar-foreground'}`}>
-                  {langLabels[l]}
+            
+            {/* NOUVEAU : Boutons de langues générés depuis Supabase */}
+            <div className="flex gap-2 flex-wrap px-2">
+              {activeLangs.map((l) => (
+                <button 
+                  key={l.code} 
+                  onClick={() => setLang(l.code)} 
+                  className={`px-2 py-1.5 text-xs font-bold rounded flex items-center gap-1.5 transition-all ${lang === l.code ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-md' : 'bg-sidebar-accent/50 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent'}`}
+                >
+                  <span className="text-sm">{l.flag}</span>
+                  <span>{l.code.toUpperCase()}</span>
                 </button>
               ))}
             </div>
+
             <button onClick={() => { logout(); navigate('/'); }} className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
               <LogOut className="h-4 w-4" />
               {t('nav.logout')}
@@ -94,7 +121,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
         </div>
       </aside>
 
-      {/* Overlay */}
+      {/* Overlay mobile */}
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-foreground/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Main content */}

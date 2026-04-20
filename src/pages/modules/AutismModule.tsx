@@ -53,6 +53,16 @@ const AutismModule: React.FC = () => {
 
     setIsSubmitting(true);
 
+    // Calcul du score global : on incrémente si la réponse indique un comportement atypique
+    let score = 0;
+    autismQuestions.forEach(q => {
+      const answer = answers[q.id];
+      if (answer !== undefined) {
+        if (q.positive && answer === false) score += 1;
+        if (!q.positive && answer === true) score += 1;
+      }
+    });
+
     try {
       const { error } = await supabase.from('evaluations').insert([{
         professional_id: user?.id,
@@ -60,6 +70,7 @@ const AutismModule: React.FC = () => {
         child_name: childName,
         child_age: parseInt(childAge),
         responses: answers,
+        score: score, // Sauvegarde du score pour les statistiques futures
         created_at: new Date().toISOString()
       }]);
 

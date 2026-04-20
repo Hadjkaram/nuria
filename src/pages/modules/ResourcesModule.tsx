@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Heart, BookOpen, Video, FileText, Download, ExternalLink, Search,
   Star, Clock, Eye, Filter, ChevronRight, Play, Bookmark, BookmarkCheck,
-  Baby, Brain, Puzzle, GraduationCap, Users, Stethoscope, ArrowLeft
+  Baby, Brain, Puzzle, GraduationCap, Users, Stethoscope, ArrowLeft, Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 type ResourceCategory = 'all' | 'guides' | 'videos' | 'articles' | 'tools' | 'training';
 type AgeGroup = 'all' | '0-1' | '1-3' | '3-6' | '6-12';
@@ -29,104 +31,10 @@ interface Resource {
   color: string;
 }
 
-const resources: Resource[] = [
-  {
-    id: '1', title: 'Guide du développement de 0 à 12 mois',
-    description: 'Comprendre les étapes clés du développement moteur, cognitif et langagier de votre bébé durant sa première année de vie.',
-    category: 'guides', type: 'pdf', ageGroup: '0-1',
-    tags: ['développement', 'motricité', 'langage', 'nourrisson'],
-    author: 'Dr. Aminata Diallo', date: '2025-11-15', rating: 4.8, views: 1250, isFeatured: true,
-    icon: Baby, color: 'from-blue-500 to-cyan-500'
-  },
-  {
-    id: '2', title: 'Signes d\'alerte du TDAH chez l\'enfant',
-    description: 'Identifier les premiers signes du Trouble Déficit de l\'Attention avec ou sans Hyperactivité et savoir quand consulter.',
-    category: 'articles', type: 'article', ageGroup: '3-6',
-    tags: ['TDAH', 'attention', 'comportement', 'dépistage'],
-    author: 'Pr. Jean Mbeki', date: '2025-10-22', rating: 4.6, views: 980,
-    icon: Brain, color: 'from-purple-500 to-violet-500'
-  },
-  {
-    id: '3', title: 'Activités de stimulation langagière à la maison',
-    description: 'Jeux et exercices pratiques pour stimuler le développement du langage de votre enfant au quotidien.',
-    category: 'guides', type: 'pdf', ageGroup: '1-3',
-    tags: ['langage', 'stimulation', 'jeux', 'communication'],
-    author: 'Fatou Diallo', date: '2025-12-01', rating: 4.9, views: 2100, isFeatured: true,
-    icon: BookOpen, color: 'from-emerald-500 to-teal-500'
-  },
-  {
-    id: '4', title: 'Comprendre le spectre de l\'autisme',
-    description: 'Vidéo explicative sur les troubles du spectre autistique, les signes précoces et les stratégies d\'accompagnement.',
-    category: 'videos', type: 'video', ageGroup: 'all', duration: '25 min',
-    tags: ['autisme', 'TSA', 'accompagnement', 'famille'],
-    author: 'Dr. Marie Ouattara', date: '2025-09-18', rating: 4.7, views: 3200, isFeatured: true,
-    icon: Puzzle, color: 'from-orange-500 to-amber-500'
-  },
-  {
-    id: '5', title: 'Grille d\'observation en classe - Maternelle',
-    description: 'Outil pratique pour les enseignants afin d\'observer et documenter le développement des enfants en milieu scolaire.',
-    category: 'tools', type: 'tool', ageGroup: '3-6',
-    tags: ['observation', 'école', 'enseignant', 'évaluation'],
-    author: 'Ministère de l\'Éducation', date: '2025-08-10', rating: 4.5, views: 750,
-    icon: GraduationCap, color: 'from-amber-500 to-yellow-500'
-  },
-  {
-    id: '6', title: 'La motricité fine : 50 activités ludiques',
-    description: 'Collection d\'activités adaptées pour développer la motricité fine selon l\'âge de l\'enfant, avec du matériel du quotidien.',
-    category: 'guides', type: 'pdf', ageGroup: '1-3',
-    tags: ['motricité fine', 'activités', 'manipulation', 'jeux'],
-    author: 'Awa Ndiaye', date: '2025-11-05', rating: 4.8, views: 1800,
-    icon: Heart, color: 'from-pink-500 to-rose-500'
-  },
-  {
-    id: '7', title: 'Webinaire : Nutrition et développement cérébral',
-    description: 'Conférence en ligne sur l\'impact de la nutrition sur le développement neurologique de l\'enfant de 0 à 6 ans.',
-    category: 'videos', type: 'video', ageGroup: 'all', duration: '45 min',
-    tags: ['nutrition', 'cerveau', 'alimentation', 'croissance'],
-    author: 'Dr. Ibrahim Coulibaly', date: '2025-10-30', rating: 4.4, views: 620,
-    icon: Stethoscope, color: 'from-indigo-500 to-blue-500'
-  },
-  {
-    id: '8', title: 'Sensibilisation communautaire au neurodéveloppement',
-    description: 'Kit de sensibilisation pour les agents communautaires : affiches, dépliants et guide d\'animation pour les causeries.',
-    category: 'tools', type: 'tool', ageGroup: 'all',
-    tags: ['communauté', 'sensibilisation', 'prévention', 'information'],
-    author: 'Programme NURIA', date: '2025-12-10', rating: 4.6, views: 430,
-    icon: Users, color: 'from-teal-500 to-cyan-500'
-  },
-  {
-    id: '9', title: 'Formation : Dépistage précoce des TND',
-    description: 'Module de formation en ligne sur les techniques de dépistage précoce des troubles du neurodéveloppement.',
-    category: 'training', type: 'article', ageGroup: 'all', duration: '2h',
-    tags: ['formation', 'dépistage', 'TND', 'professionnel'],
-    author: 'Académie NURIA', date: '2025-11-20', rating: 4.9, views: 560, isFeatured: true,
-    icon: GraduationCap, color: 'from-violet-500 to-purple-500'
-  },
-  {
-    id: '10', title: 'Le sommeil de l\'enfant : guide pratique',
-    description: 'Conseils et routines pour favoriser un sommeil de qualité selon l\'âge, essentiel au développement neurologique.',
-    category: 'articles', type: 'article', ageGroup: '0-1',
-    tags: ['sommeil', 'routine', 'bien-être', 'nuit'],
-    author: 'Dr. Aminata Diallo', date: '2025-09-25', rating: 4.7, views: 1450,
-    icon: Heart, color: 'from-sky-500 to-blue-500'
-  },
-  {
-    id: '11', title: 'Checklist des jalons développementaux 3-6 ans',
-    description: 'Liste de vérification interactive des étapes clés du développement pour les enfants d\'âge préscolaire.',
-    category: 'tools', type: 'tool', ageGroup: '3-6',
-    tags: ['jalons', 'développement', 'checklist', 'préscolaire'],
-    author: 'Programme NURIA', date: '2025-10-15', rating: 4.5, views: 890,
-    icon: FileText, color: 'from-green-500 to-emerald-500'
-  },
-  {
-    id: '12', title: 'Stratégies d\'inclusion scolaire',
-    description: 'Guide pratique pour accompagner les enfants à besoins spécifiques en milieu scolaire ordinaire.',
-    category: 'guides', type: 'pdf', ageGroup: '6-12',
-    tags: ['inclusion', 'école', 'besoins spécifiques', 'adaptation'],
-    author: 'Fatou Diallo', date: '2025-12-05', rating: 4.8, views: 670,
-    icon: GraduationCap, color: 'from-lime-500 to-green-500'
-  },
-];
+// Mapping textuel des icônes stockées en DB vers le composant Lucide
+const iconMap: Record<string, React.ElementType> = {
+  Baby, Brain, BookOpen, Puzzle, GraduationCap, Heart, Stethoscope, Users, FileText
+};
 
 const categoryConfig: Record<ResourceCategory, { label: string; icon: any }> = {
   all: { label: 'Tout', icon: Heart },
@@ -152,12 +60,59 @@ const typeIcons: Record<string, any> = {
 const ResourcesModule: React.FC = () => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [resources, setResources] = useState<Resource[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+
   const [selectedCategory, setSelectedCategory] = useState<ResourceCategory>('all');
   const [selectedAge, setSelectedAge] = useState<AgeGroup>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [savedResources, setSavedResources] = useState<Set<string>>(new Set(['1', '3']));
+  const [savedResources, setSavedResources] = useState<Set<string>>(new Set()); // <-- INITIALISATION VIDE
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [showSavedOnly, setShowSavedOnly] = useState(false);
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  useEffect(() => {
+    const fetchResources = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('resources_library')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (data) {
+          const formatted: Resource[] = data.map(r => ({
+            id: r.id,
+            title: r.title,
+            description: r.description,
+            category: r.category as ResourceCategory,
+            type: r.type as any,
+            ageGroup: r.age_group as AgeGroup,
+            tags: r.tags || [],
+            duration: r.duration || undefined,
+            author: r.author,
+            date: new Date(r.publish_date).toLocaleDateString('fr-FR'),
+            rating: Number(r.rating),
+            views: r.views,
+            isFeatured: r.is_featured,
+            icon: iconMap[r.icon_name] || FileText, // Fallback si icône introuvable
+            color: r.color_gradient
+          }));
+          setResources(formatted);
+        }
+      } catch (err: any) {
+        toast({ title: "Erreur", description: "Impossible de charger les ressources.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchResources();
+  }, [toast]);
 
   const toggleSave = (id: string) => {
     setSavedResources(prev => {
@@ -173,7 +128,7 @@ const ResourcesModule: React.FC = () => {
     if (showSavedOnly && !savedResources.has(r.id)) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      return r.title.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.tags.some(tag => tag.includes(q));
+      return r.title.toLowerCase().includes(q) || r.description.toLowerCase().includes(q) || r.tags.some(tag => tag.toLowerCase().includes(q));
     }
     return true;
   });
@@ -300,121 +255,129 @@ const ResourcesModule: React.FC = () => {
           <p className="text-muted-foreground text-sm mt-1">Guides, vidéos et outils pour accompagner le développement de votre enfant</p>
         </div>
 
-        {/* Featured carousel */}
-        <div>
-          <h2 className="font-semibold mb-3 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-500" /> Ressources à la une</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {featured.map(r => {
-              const Icon = r.icon;
-              return (
-                <button key={r.id} onClick={() => setSelectedResource(r)} className="text-left bg-card rounded-xl border border-border overflow-hidden hover:shadow-md transition-shadow group">
-                  <div className={`bg-gradient-to-br ${r.color} p-4 text-white`}>
-                    <Icon className="h-6 w-6 mb-2 opacity-80" />
-                    <h3 className="font-semibold text-sm leading-snug line-clamp-2">{r.title}</h3>
-                  </div>
-                  <div className="p-3">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1"><Star className="h-3 w-3 text-yellow-500" /> {r.rating}</span>
-                      <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {r.views}</span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Search + Filters */}
-        <div className="bg-card rounded-xl border border-border p-4 space-y-4">
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text" placeholder="Rechercher une ressource..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            <button onClick={() => setShowSavedOnly(!showSavedOnly)} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm transition-colors ${showSavedOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-muted'}`}>
-              <Bookmark className="h-4 w-4" /> Sauvegardés ({savedResources.size})
-            </button>
-          </div>
-
-          {/* Category tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {(Object.keys(categoryConfig) as ResourceCategory[]).map(cat => {
-              const { label, icon: CatIcon } = categoryConfig[cat];
-              return (
-                <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${selectedCategory === cat ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
-                  <CatIcon className="h-3.5 w-3.5" /> {label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Age filter */}
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-            {(Object.keys(ageGroupLabels) as AgeGroup[]).map(age => (
-              <button key={age} onClick={() => setSelectedAge(age)} className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${selectedAge === age ? 'bg-accent text-accent-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground'}`}>
-                {ageGroupLabels[age]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Results count */}
-        <p className="text-sm text-muted-foreground">{filtered.length} ressource{filtered.length !== 1 ? 's' : ''} trouvée{filtered.length !== 1 ? 's' : ''}</p>
-
-        {/* Resource grid */}
-        {filtered.length === 0 ? (
-          <div className="bg-card rounded-xl border border-border p-12 text-center">
-            <Search className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-            <p className="font-medium">Aucune ressource trouvée</p>
-            <p className="text-sm text-muted-foreground mt-1">Essayez de modifier vos filtres ou votre recherche</p>
-          </div>
+        {isLoading ? (
+          <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(r => {
-              const Icon = r.icon;
-              const TypeIcon = typeIcons[r.type] || FileText;
-              return (
-                <div key={r.id} className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-md transition-shadow group">
-                  <div className={`bg-gradient-to-br ${r.color} p-4 text-white relative`}>
-                    <div className="flex items-start justify-between">
-                      <Icon className="h-8 w-8 opacity-80" />
-                      <button onClick={e => { e.stopPropagation(); toggleSave(r.id); }} className="p-1.5 bg-white/20 rounded-lg hover:bg-white/30 transition-colors">
-                        {savedResources.has(r.id) ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+          <>
+            {/* Featured carousel */}
+            {featured.length > 0 && (
+              <div>
+                <h2 className="font-semibold mb-3 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-500" /> Ressources à la une</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {featured.map(r => {
+                    const Icon = r.icon;
+                    return (
+                      <button key={r.id} onClick={() => setSelectedResource(r)} className="text-left bg-card rounded-xl border border-border overflow-hidden hover:shadow-md transition-shadow group">
+                        <div className={`bg-gradient-to-br ${r.color} p-4 text-white`}>
+                          <Icon className="h-6 w-6 mb-2 opacity-80" />
+                          <h3 className="font-semibold text-sm leading-snug line-clamp-2">{r.title}</h3>
+                        </div>
+                        <div className="p-3">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1"><Star className="h-3 w-3 text-yellow-500" /> {r.rating}</span>
+                            <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {r.views}</span>
+                          </div>
+                        </div>
                       </button>
-                    </div>
-                    <h3 className="font-semibold mt-3 leading-snug line-clamp-2">{r.title}</h3>
-                    <div className="flex items-center gap-2 mt-2 text-xs text-white/80">
-                      <TypeIcon className="h-3 w-3" />
-                      <span>{categoryConfig[r.category]?.label}</span>
-                      {r.duration && <><span>•</span><span>{r.duration}</span></>}
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-3">
-                    <p className="text-sm text-muted-foreground line-clamp-2">{r.description}</p>
-                    <div className="flex flex-wrap gap-1">
-                      {r.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="bg-muted text-muted-foreground text-xs px-2 py-0.5 rounded-full">#{tag}</span>
-                      ))}
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
-                      <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1"><Star className="h-3 w-3 text-yellow-500" /> {r.rating}</span>
-                        <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {r.views}</span>
-                      </div>
-                      <span>{ageGroupLabels[r.ageGroup]}</span>
-                    </div>
-                    <button onClick={() => setSelectedResource(r)} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">
-                      Consulter <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+
+            {/* Search + Filters */}
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <div className="flex flex-col md:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text" placeholder="Rechercher une ressource..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <button onClick={() => setShowSavedOnly(!showSavedOnly)} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm transition-colors ${showSavedOnly ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-muted'}`}>
+                  <Bookmark className="h-4 w-4" /> Sauvegardés ({savedResources.size})
+                </button>
+              </div>
+
+              {/* Category tabs */}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {(Object.keys(categoryConfig) as ResourceCategory[]).map(cat => {
+                  const { label, icon: CatIcon } = categoryConfig[cat];
+                  return (
+                    <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${selectedCategory === cat ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+                      <CatIcon className="h-3.5 w-3.5" /> {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Age filter */}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                {(Object.keys(ageGroupLabels) as AgeGroup[]).map(age => (
+                  <button key={age} onClick={() => setSelectedAge(age)} className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${selectedAge === age ? 'bg-accent text-accent-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground'}`}>
+                    {ageGroupLabels[age]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Results count */}
+            <p className="text-sm text-muted-foreground">{filtered.length} ressource{filtered.length !== 1 ? 's' : ''} trouvée{filtered.length !== 1 ? 's' : ''}</p>
+
+            {/* Resource grid */}
+            {filtered.length === 0 ? (
+              <div className="bg-card rounded-xl border border-border p-12 text-center">
+                <Search className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                <p className="font-medium">Aucune ressource trouvée</p>
+                <p className="text-sm text-muted-foreground mt-1">Essayez de modifier vos filtres ou votre recherche</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map(r => {
+                  const Icon = r.icon;
+                  const TypeIcon = typeIcons[r.type] || FileText;
+                  return (
+                    <div key={r.id} className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-md transition-shadow group">
+                      <div className={`bg-gradient-to-br ${r.color} p-4 text-white relative`}>
+                        <div className="flex items-start justify-between">
+                          <Icon className="h-8 w-8 opacity-80" />
+                          <button onClick={e => { e.stopPropagation(); toggleSave(r.id); }} className="p-1.5 bg-white/20 rounded-lg hover:bg-white/30 transition-colors">
+                            {savedResources.has(r.id) ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        <h3 className="font-semibold mt-3 leading-snug line-clamp-2">{r.title}</h3>
+                        <div className="flex items-center gap-2 mt-2 text-xs text-white/80">
+                          <TypeIcon className="h-3 w-3" />
+                          <span>{categoryConfig[r.category]?.label}</span>
+                          {r.duration && <><span>•</span><span>{r.duration}</span></>}
+                        </div>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <p className="text-sm text-muted-foreground line-clamp-2">{r.description}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {r.tags.slice(0, 3).map(tag => (
+                            <span key={tag} className="bg-muted text-muted-foreground text-xs px-2 py-0.5 rounded-full">#{tag}</span>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border">
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1"><Star className="h-3 w-3 text-yellow-500" /> {r.rating}</span>
+                            <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> {r.views}</span>
+                          </div>
+                          <span>{ageGroupLabels[r.ageGroup]}</span>
+                        </div>
+                        <button onClick={() => setSelectedResource(r)} className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">
+                          Consulter <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     </DashboardLayout>

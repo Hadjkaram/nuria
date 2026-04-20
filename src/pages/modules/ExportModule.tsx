@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useAuth } from '@/contexts/AuthContext'; 
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -10,12 +11,12 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Download, FileSpreadsheet, FileText, File, Clock, CheckCircle, AlertCircle, Trash2, RefreshCw, Filter, Calendar, Database, Users, Activity, MapPin, BarChart3, Settings } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, File, Clock, CheckCircle, AlertCircle, Trash2, RefreshCw, Filter, Calendar, Database, Users, Activity, MapPin, BarChart3, Settings, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase'; 
 
-type Lang = 'fr' | 'en' | 'pt' | 'ar';
-
-const t = (translations: Record<Lang, string>, lang: Lang) => translations[lang] || translations.fr;
+// Le type Lang strict est retiré pour supporter nos langues dynamiques
+const t = (translations: Record<string, string>, lang: string) => translations[lang] || translations.fr || Object.values(translations)[0];
 
 interface ExportConfig {
   id: string;
@@ -28,6 +29,7 @@ interface ExportConfig {
   progress: number;
   createdAt: string;
   fileSize?: string;
+  db_id?: string;
 }
 
 const dataSources = [
@@ -54,7 +56,7 @@ const periodOptions = [
   { value: 'all', label: { fr: 'Toutes les données', en: 'All data', pt: 'Todos os dados', ar: 'كل البيانات' } },
 ];
 
-const filterOptions: Record<string, { id: string; label: Record<Lang, string> }[]> = {
+const filterOptions: Record<string, { id: string; label: Record<string, string> }[]> = {
   children: [
     { id: 'demographics', label: { fr: 'Données démographiques', en: 'Demographics', pt: 'Dados demográficos', ar: 'البيانات الديموغرافية' } },
     { id: 'medical', label: { fr: 'Données médicales', en: 'Medical data', pt: 'Dados médicos', ar: 'البيانات الطبية' } },
@@ -88,18 +90,19 @@ const filterOptions: Record<string, { id: string; label: Record<Lang, string> }[
   ],
 };
 
-const initialExports: ExportConfig[] = [
-  { id: '1', name: 'Export Enfants - Mars 2026', format: 'excel', dataSource: 'children', filters: ['demographics', 'medical'], period: '1m', status: 'completed', progress: 100, createdAt: '2026-03-09 14:30', fileSize: '2.4 MB' },
-  { id: '2', name: 'Indicateurs Q1 2026', format: 'pdf', dataSource: 'indicators', filters: ['kpi', 'trends'], period: '3m', status: 'completed', progress: 100, createdAt: '2026-03-08 09:15', fileSize: '1.1 MB' },
-  { id: '3', name: 'Dépistages Février', format: 'csv', dataSource: 'screening', filters: ['scores', 'referrals'], period: '1m', status: 'processing', progress: 67, createdAt: '2026-03-10 08:00' },
-  { id: '4', name: 'Structures nationales', format: 'json', dataSource: 'structures', filters: ['info', 'capacity'], period: 'all', status: 'error', progress: 0, createdAt: '2026-03-07 16:45' },
-];
-
 const ExportModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { user } = useAuth();
   const { toast } = useToast();
 
-  const [exports, setExports] = useState<ExportConfig[]>(initialExports);
+  const [exports, setExports] = useState<ExportConfig[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // VRAIS chiffres dynamiques
+  const [dbCounts, setDbCounts] = useState<Record<string, number>>({
+    children: 0, screening: 0, appointments: 0, structures: 0, indicators: 12, users: 4
+  });
+
   const [selectedSource, setSelectedSource] = useState('children');
   const [selectedFormat, setSelectedFormat] = useState('excel');
   const [selectedPeriod, setSelectedPeriod] = useState('3m');
@@ -107,6 +110,53 @@ const ExportModule: React.FC = () => {
   const [exportName, setExportName] = useState('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('new');
+
+  // --- LECTURE DES DONNÉES (Historique + Comptage réel) ---
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      // 1. Récupération de l'historique des exports
+      const { data: exportData } = await supabase.from('data_exports').select('*').order('created_at', { ascending: false });
+      if (exportData) {
+        setExports(exportData.map(d => ({
+          id: d.id, db_id: d.id, name: d.name, format: d.format as ExportConfig['format'],
+          dataSource: d.data_source, filters: d.filters, period: d.period,
+          status: d.status as ExportConfig['status'], progress: d.progress,
+          fileSize: d.file_size || undefined,
+          createdAt: new Date(d.created_at).toLocaleString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR'),
+        })));
+      }
+
+      // 2. Comptage réel des données dans Supabase
+      const [resStruct, resAppt, resScreen] = await Promise.all([
+        supabase.from('structures').select('*', { count: 'exact', head: true }),
+        supabase.from('appointments').select('*', { count: 'exact', head: true }),
+        supabase.from('general_screenings').select('*', { count: 'exact', head: true })
+      ]);
+
+      // Calcul des enfants uniques recensés
+      const { data: childrenData } = await supabase.from('screenings').select('child_name');
+      const uniqueChildrenCount = childrenData ? new Set(childrenData.map(c => c.child_name)).size : 0;
+
+      setDbCounts({
+        children: uniqueChildrenCount,
+        screening: resScreen.count || 0,
+        appointments: resAppt.count || 0,
+        structures: resStruct.count || 0,
+        indicators: 15, // Chiffre fixe de démonstration
+        users: 4 // Chiffre fixe de démonstration
+      });
+
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [user, lang]);
 
   const labels = {
     title: { fr: 'Export de données', en: 'Data Export', pt: 'Exportação de dados', ar: 'تصدير البيانات' },
@@ -132,14 +182,7 @@ const ExportModule: React.FC = () => {
     cancel: { fr: 'Annuler', en: 'Cancel', pt: 'Cancelar', ar: 'إلغاء' },
     noExports: { fr: 'Aucun export récent', en: 'No recent exports', pt: 'Nenhuma exportação recente', ar: 'لا توجد عمليات تصدير حديثة' },
     selectAll: { fr: 'Tout sélectionner', en: 'Select all', pt: 'Selecionar tudo', ar: 'تحديد الكل' },
-    records: { fr: 'enregistrements estimés', en: 'estimated records', pt: 'registros estimados', ar: 'سجلات مقدرة' },
-    quickExport: { fr: 'Export rapide', en: 'Quick export', pt: 'Exportação rápida', ar: 'تصدير سريع' },
-    customExport: { fr: 'Export personnalisé', en: 'Custom export', pt: 'Exportação personalizada', ar: 'تصدير مخصص' },
-  };
-
-  const estimatedRecords: Record<string, number> = {
-    children: 12450, screening: 8320, appointments: 15680,
-    structures: 342, indicators: 2100, users: 1580,
+    records: { fr: 'enregistrements', en: 'records found', pt: 'registros reais', ar: 'سجلات' },
   };
 
   const templateExports = [
@@ -170,58 +213,68 @@ const ExportModule: React.FC = () => {
     setShowConfirmDialog(true);
   };
 
-  const confirmExport = () => {
+  const confirmExport = async () => {
     const sourceLabel = dataSources.find(s => s.id === selectedSource)?.label[lang] || selectedSource;
-    const newExport: ExportConfig = {
-      id: Date.now().toString(),
-      name: exportName || `${sourceLabel} - ${new Date().toLocaleDateString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR')}`,
-      format: selectedFormat as ExportConfig['format'],
-      dataSource: selectedSource,
-      filters: [...selectedFilters],
-      period: selectedPeriod,
-      status: 'processing',
-      progress: 0,
-      createdAt: new Date().toLocaleString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR'),
-    };
-
-    setExports(prev => [newExport, ...prev]);
+    const computedName = exportName || `${sourceLabel} - ${new Date().toLocaleDateString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR')}`;
+    
     setShowConfirmDialog(false);
     setActiveTab('history');
     setExportName('');
     setSelectedFilters([]);
 
-    // Simulate progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 25;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        setExports(prev => prev.map(e => e.id === newExport.id ? { ...e, status: 'completed', progress: 100, fileSize: `${(Math.random() * 4 + 0.5).toFixed(1)} MB` } : e));
-        toast({ title: t({ fr: 'Export terminé !', en: 'Export completed!', pt: 'Exportação concluída!', ar: 'اكتمل التصدير!' }, lang) });
-      }
-      setExports(prev => prev.map(e => e.id === newExport.id && e.status === 'processing' ? { ...e, progress: Math.min(progress, 99) } : e));
-    }, 800);
+    try {
+      const { data, error } = await supabase.from('data_exports').insert([{
+        user_id: user?.id, name: computedName, format: selectedFormat,
+        data_source: selectedSource, filters: selectedFilters, period: selectedPeriod,
+        status: 'processing', progress: 0
+      }]).select().single();
+
+      if (error) throw error;
+      if (!data) return;
+
+      const newExportId = data.id;
+
+      const localExport: ExportConfig = {
+        id: newExportId, db_id: newExportId, name: computedName, format: selectedFormat as any,
+        dataSource: selectedSource, filters: [...selectedFilters], period: selectedPeriod,
+        status: 'processing', progress: 0,
+        createdAt: new Date().toLocaleString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR'),
+      };
+      setExports(prev => [localExport, ...prev]);
+
+      let progress = 0;
+      const interval = setInterval(async () => {
+        progress += Math.random() * 25;
+        if (progress >= 100) {
+          progress = 100;
+          clearInterval(interval);
+          const finalSize = `${(Math.random() * 4 + 0.5).toFixed(1)} MB`;
+          
+          await supabase.from('data_exports').update({ status: 'completed', progress: 100, file_size: finalSize }).eq('id', newExportId);
+          setExports(prev => prev.map(e => e.id === newExportId ? { ...e, status: 'completed', progress: 100, fileSize: finalSize } : e));
+          toast({ title: t({ fr: 'Export terminé !', en: 'Export completed!', pt: 'Exportação concluída!', ar: 'اكتمل التصدير!' }, lang) });
+        } else {
+          setExports(prev => prev.map(e => e.id === newExportId && e.status === 'processing' ? { ...e, progress: Math.min(progress, 99) } : e));
+        }
+      }, 800);
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setExports(prev => prev.filter(e => e.id !== id));
-    toast({ title: t({ fr: 'Export supprimé', en: 'Export deleted', pt: 'Exportação excluída', ar: 'تم حذف التصدير' }, lang) });
+  const handleDelete = async (id: string) => {
+    try {
+      const { error } = await supabase.from('data_exports').delete().eq('id', id);
+      if (error) throw error;
+      setExports(prev => prev.filter(e => e.id !== id));
+      toast({ title: t({ fr: 'Export supprimé', en: 'Export deleted', pt: 'Exportação excluída', ar: 'تم حذف التصدير' }, lang) });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   };
 
   const handleRetry = (id: string) => {
-    setExports(prev => prev.map(e => e.id === id ? { ...e, status: 'processing', progress: 0 } : e));
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 30;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        setExports(prev => prev.map(e => e.id === id ? { ...e, status: 'completed', progress: 100, fileSize: `${(Math.random() * 4 + 0.5).toFixed(1)} MB` } : e));
-        toast({ title: t({ fr: 'Export terminé !', en: 'Export completed!', pt: 'Exportação concluída!', ar: 'اكتمل التصدير!' }, lang) });
-      }
-      setExports(prev => prev.map(e => e.id === id && e.status === 'processing' ? { ...e, progress: Math.min(progress, 99) } : e));
-    }, 600);
+    toast({ title: "Info", description: "Veuillez relancer un nouvel export depuis l'onglet dédié." });
   };
 
   const handleDownload = (exp: ExportConfig) => {
@@ -233,7 +286,7 @@ const ExportModule: React.FC = () => {
     setSelectedFormat(template.format);
     setSelectedPeriod(template.period);
     setSelectedFilters(template.filters);
-    setExportName(template.name[lang]);
+    setExportName(template.name[lang] || template.name.fr);
     setActiveTab('new');
     toast({ title: t({ fr: 'Modèle chargé', en: 'Template loaded', pt: 'Modelo carregado', ar: 'تم تحميل القالب' }, lang) });
   };
@@ -284,7 +337,6 @@ const ExportModule: React.FC = () => {
 
           {/* NEW EXPORT */}
           <TabsContent value="new" className="space-y-6 mt-4">
-            {/* Data Source */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2"><Database className="h-4 w-4 text-primary" />{t(labels.selectSource, lang)}</CardTitle>
@@ -299,7 +351,8 @@ const ExportModule: React.FC = () => {
                         className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-sm font-medium ${isSelected ? 'border-primary bg-primary/5 text-primary' : 'border-border bg-card hover:border-primary/30 text-muted-foreground hover:text-foreground'}`}>
                         <Icon className="h-6 w-6" />
                         {t(src.label, lang)}
-                        <span className="text-xs opacity-60">{estimatedRecords[src.id]?.toLocaleString()}</span>
+                        {/* VRAIS CHIFFRES ICI */}
+                        <span className="text-xs opacity-60 font-bold">{dbCounts[src.id] || 0}</span>
                       </button>
                     );
                   })}
@@ -308,7 +361,6 @@ const ExportModule: React.FC = () => {
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Format */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2"><FileSpreadsheet className="h-4 w-4 text-primary" />{t(labels.selectFormat, lang)}</CardTitle>
@@ -331,7 +383,6 @@ const ExportModule: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* Period + Fields */}
               <div className="space-y-6">
                 <Card>
                   <CardHeader className="pb-3">
@@ -344,7 +395,10 @@ const ExportModule: React.FC = () => {
                         {periodOptions.map(p => <SelectItem key={p.value} value={p.value}>{t(p.label, lang)}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground mt-2">~{estimatedRecords[selectedSource]?.toLocaleString()} {t(labels.records, lang)}</p>
+                    {/* VRAIS CHIFFRES ICI */}
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Total : <strong>{dbCounts[selectedSource] || 0}</strong> {t(labels.records, lang)}
+                    </p>
                   </CardContent>
                 </Card>
 
@@ -367,7 +421,6 @@ const ExportModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Export name + action */}
             <Card>
               <CardContent className="pt-6">
                 <div className="flex flex-col sm:flex-row gap-4 items-end">
@@ -392,7 +445,9 @@ const ExportModule: React.FC = () => {
 
           {/* HISTORY */}
           <TabsContent value="history" className="mt-4">
-            {exports.length === 0 ? (
+            {isLoading ? (
+               <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            ) : exports.length === 0 ? (
               <Card><CardContent className="py-12 text-center text-muted-foreground">{t(labels.noExports, lang)}</CardContent></Card>
             ) : (
               <div className="space-y-3">
@@ -450,7 +505,7 @@ const ExportModule: React.FC = () => {
               {templateExports.map((tpl, i) => {
                 const Icon = getFormatIcon(tpl.format);
                 return (
-                  <Card key={i} className="hover:border-primary/30 transition-colors cursor-pointer" onClick={() => handleTemplateExport(tpl)}>
+                  <Card key={i} className="hover:border-primary/30 transition-colors cursor-pointer" onClick={() => handleTemplateExport(tpl as any)}>
                     <CardContent className="py-5">
                       <div className="flex items-start gap-3">
                         <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext'; // <-- AJOUT
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,8 +10,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Eye, Plus, Search, Calendar, User, AlertTriangle, CheckCircle, Clock, Filter, FileText, ArrowLeft, Trash2, Edit } from 'lucide-react';
+import { Eye, Plus, Search, Calendar, User, AlertTriangle, CheckCircle, Clock, Filter, FileText, ArrowLeft, Trash2, Edit, Loader2 } from 'lucide-react'; // <-- AJOUT Loader2
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 interface Observation {
   id: string;
@@ -23,46 +26,8 @@ interface Observation {
   description: string;
   actions: string;
   status: 'draft' | 'submitted' | 'reviewed';
+  db_id?: string; // <-- AJOUT ID Supabase
 }
-
-const initialObservations: Observation[] = [
-  {
-    id: '1', studentName: 'Koffi A.', studentClass: 'CP1', date: '2026-03-10',
-    domain: 'behavior', severity: 'high', context: 'En classe, pendant les exercices',
-    description: 'Ne peut rester assis plus de 5 minutes, se lève constamment, agite les mains. Perturbe les élèves voisins.',
-    actions: 'Placé au premier rang, pauses fréquentes accordées', status: 'submitted',
-  },
-  {
-    id: '2', studentName: 'Mariam D.', studentClass: 'CE1', date: '2026-03-08',
-    domain: 'language', severity: 'medium', context: 'Lecture à voix haute et échanges oraux',
-    description: 'Difficulté à articuler certains sons, vocabulaire limité par rapport aux pairs. Progrès avec les supports visuels.',
-    actions: 'Supports visuels mis en place, exercices de phonologie', status: 'reviewed',
-  },
-  {
-    id: '3', studentName: 'Oumar B.', studentClass: 'CP2', date: '2026-03-07',
-    domain: 'social', severity: 'medium', context: 'Récréation et travaux de groupe',
-    description: 'Évite systématiquement les interactions avec les autres enfants. Reste seul dans la cour. Ne participe pas aux activités de groupe.',
-    actions: 'Binôme avec un élève bienveillant assigné', status: 'submitted',
-  },
-  {
-    id: '4', studentName: 'Aïcha T.', studentClass: 'CE2', date: '2026-03-05',
-    domain: 'cognitive', severity: 'low', context: 'Exercices de mathématiques',
-    description: 'Difficultés en calcul mental, mais bons résultats à l\'écrit avec du temps supplémentaire.',
-    actions: 'Temps supplémentaire accordé, manipulations concrètes', status: 'draft',
-  },
-  {
-    id: '5', studentName: 'Moussa K.', studentClass: 'CP1', date: '2026-03-04',
-    domain: 'emotional', severity: 'high', context: 'Arrivée le matin et transitions',
-    description: 'Pleure fréquemment à l\'arrivée, anxiété de séparation marquée. Se calme après 30 minutes environ.',
-    actions: 'Accueil individualisé, objet transitionnel autorisé', status: 'submitted',
-  },
-  {
-    id: '6', studentName: 'Fatou S.', studentClass: 'CE1', date: '2026-03-03',
-    domain: 'motor', severity: 'low', context: 'Activités d\'écriture et motricité fine',
-    description: 'Tenue du crayon non conventionnelle, lettres mal formées mais lisibles. Fatigue rapide lors des exercices d\'écriture.',
-    actions: 'Guide-doigt fourni, exercices de motricité fine', status: 'reviewed',
-  },
-];
 
 const domainLabels: Record<string, { fr: string; color: string; bg: string }> = {
   behavior: { fr: 'Comportement', color: 'text-red-700', bg: 'bg-red-100 dark:bg-red-950/30' },
@@ -87,7 +52,13 @@ const statusLabels: Record<string, { fr: string; icon: React.ElementType; color:
 
 const ObservationsModule: React.FC = () => {
   const { t } = useLanguage();
-  const [observations, setObservations] = useState<Observation[]>(initialObservations);
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [observations, setObservations] = useState<Observation[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [search, setSearch] = useState('');
   const [filterDomain, setFilterDomain] = useState<string>('all');
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
@@ -101,6 +72,44 @@ const ObservationsModule: React.FC = () => {
     studentName: '', studentClass: '', domain: 'behavior' as Observation['domain'],
     severity: 'medium' as Observation['severity'], context: '', description: '', actions: '',
   });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchObservations = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('teacher_observations')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        const formattedObs: Observation[] = data.map(o => ({
+          id: o.id,
+          db_id: o.id,
+          studentName: o.student_name,
+          studentClass: o.student_class,
+          date: new Date(o.observation_date).toISOString().split('T')[0],
+          domain: o.domain as Observation['domain'],
+          severity: o.severity as Observation['severity'],
+          context: o.context,
+          description: o.description,
+          actions: o.actions || '',
+          status: o.status as Observation['status']
+        }));
+        setObservations(formattedObs);
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les observations.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchObservations();
+  }, [user]);
 
   const filtered = observations.filter(o => {
     const matchSearch = o.studentName.toLowerCase().includes(search.toLowerCase()) || o.description.toLowerCase().includes(search.toLowerCase());
@@ -117,28 +126,81 @@ const ObservationsModule: React.FC = () => {
     reviewed: observations.filter(o => o.status === 'reviewed').length,
   };
 
-  const handleSubmit = (asDraft: boolean) => {
-    const newObs: Observation = {
-      id: Date.now().toString(),
-      ...form,
-      date: new Date().toISOString().split('T')[0],
-      status: asDraft ? 'draft' : 'submitted',
-    };
-    setObservations(prev => [newObs, ...prev]);
-    setForm({ studentName: '', studentClass: '', domain: 'behavior', severity: 'medium', context: '', description: '', actions: '' });
-    setShowForm(false);
-    setActiveTab('list');
+  // --- 2. CRÉATION EN DB ---
+  const handleSubmit = async (asDraft: boolean) => {
+    if (!form.studentName || !form.description || (!asDraft && !form.context)) return;
+    setIsSubmitting(true);
+
+    try {
+      const statusToSave = asDraft ? 'draft' : 'submitted';
+      
+      const payload = {
+        user_id: user?.id,
+        student_name: form.studentName,
+        student_class: form.studentClass,
+        observation_date: new Date().toISOString().split('T')[0],
+        domain: form.domain,
+        severity: form.severity,
+        context: form.context,
+        description: form.description,
+        actions: form.actions,
+        status: statusToSave
+      };
+
+      const { error } = await supabase.from('teacher_observations').insert([payload]);
+      if (error) throw error;
+
+      toast({ title: "Succès", description: asDraft ? "Brouillon sauvegardé" : "Observation soumise" });
+      setForm({ studentName: '', studentClass: '', domain: 'behavior', severity: 'medium', context: '', description: '', actions: '' });
+      setShowForm(false);
+      setActiveTab('list');
+      fetchObservations();
+
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setObservations(prev => prev.filter(o => o.id !== id));
-    setSelectedObs(null);
+  // --- 3. SUPPRESSION EN DB ---
+  const handleDelete = async (id: string) => {
+    const obs = observations.find(o => o.id === id);
+    if (!obs || !obs.db_id) return;
+
+    try {
+      const { error } = await supabase.from('teacher_observations').delete().eq('id', obs.db_id);
+      if (error) throw error;
+      
+      setObservations(prev => prev.filter(o => o.id !== id));
+      setSelectedObs(null);
+      toast({ title: "Succès", description: "Observation supprimée" });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
+  };
+
+  // --- 4. MISE À JOUR DU STATUT EN DB ---
+  const handleStatusUpdate = async (id: string, newStatus: Observation['status']) => {
+    const obs = observations.find(o => o.id === id);
+    if (!obs || !obs.db_id) return;
+
+    try {
+      const { error } = await supabase.from('teacher_observations').update({ status: newStatus }).eq('id', obs.db_id);
+      if (error) throw error;
+
+      setObservations(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o));
+      setSelectedObs(prev => prev ? { ...prev, status: newStatus } : null);
+      toast({ title: "Succès", description: "Statut mis à jour" });
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    }
   };
 
   if (selectedObs) {
-    const domain = domainLabels[selectedObs.domain];
-    const severity = severityLabels[selectedObs.severity];
-    const status = statusLabels[selectedObs.status];
+    const domain = domainLabels[selectedObs.domain] || domainLabels.behavior;
+    const severity = severityLabels[selectedObs.severity] || severityLabels.medium;
+    const status = statusLabels[selectedObs.status] || statusLabels.draft;
     const StatusIcon = status.icon;
 
     return (
@@ -184,15 +246,16 @@ const ObservationsModule: React.FC = () => {
 
               <div>
                 <h3 className="text-sm font-semibold mb-1 text-muted-foreground">Actions mises en place</h3>
-                <p className="text-sm">{selectedObs.actions}</p>
+                <p className="text-sm">{selectedObs.actions || <span className="italic text-slate-400">Aucune action précisée</span>}</p>
               </div>
 
               <div className="flex gap-2 pt-2">
                 {selectedObs.status === 'draft' && (
-                  <Button size="sm" onClick={() => {
-                    setObservations(prev => prev.map(o => o.id === selectedObs.id ? { ...o, status: 'submitted' } : o));
-                    setSelectedObs({ ...selectedObs, status: 'submitted' });
-                  }}>Soumettre</Button>
+                  <Button size="sm" onClick={() => handleStatusUpdate(selectedObs.id, 'submitted')}>Soumettre</Button>
+                )}
+                {/* Exemple optionnel d'un bouton de revue pour les admins/psy */}
+                {selectedObs.status === 'submitted' && (
+                  <Button size="sm" variant="outline" className="border-emerald-500 text-emerald-600 hover:bg-emerald-50" onClick={() => handleStatusUpdate(selectedObs.id, 'reviewed')}>Marquer comme revue</Button>
                 )}
                 <Button size="sm" variant="destructive" onClick={() => handleDelete(selectedObs.id)} className="gap-1">
                   <Trash2 className="h-3.5 w-3.5" /> Supprimer
@@ -274,42 +337,46 @@ const ObservationsModule: React.FC = () => {
           </div>
 
           {/* List */}
-          <div className="space-y-3">
-            {filtered.length === 0 ? (
-              <Card><CardContent className="p-8 text-center text-muted-foreground">Aucune observation trouvée</CardContent></Card>
-            ) : (
-              filtered.map(obs => {
-                const domain = domainLabels[obs.domain];
-                const severity = severityLabels[obs.severity];
-                const status = statusLabels[obs.status];
-                const StatusIcon = status.icon;
-                return (
-                  <Card key={obs.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedObs(obs)}>
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-semibold text-sm">{obs.studentName}</span>
-                            <span className="text-xs text-muted-foreground">({obs.studentClass})</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${domain.bg} ${domain.color}`}>{domain.fr}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${severity.bg} ${severity.color}`}>{severity.fr}</span>
+          {isLoading ? (
+             <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+          ) : (
+            <div className="space-y-3">
+              {filtered.length === 0 ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">Aucune observation trouvée</CardContent></Card>
+              ) : (
+                filtered.map(obs => {
+                  const domain = domainLabels[obs.domain] || domainLabels.behavior;
+                  const severity = severityLabels[obs.severity] || severityLabels.medium;
+                  const status = statusLabels[obs.status] || statusLabels.draft;
+                  const StatusIcon = status.icon;
+                  return (
+                    <Card key={obs.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedObs(obs)}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-sm">{obs.studentName}</span>
+                              <span className="text-xs text-muted-foreground">({obs.studentClass})</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${domain.bg} ${domain.color}`}>{domain.fr}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${severity.bg} ${severity.color}`}>{severity.fr}</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2">{obs.description}</p>
                           </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">{obs.description}</p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          <span className="text-xs text-muted-foreground">{new Date(obs.date).toLocaleDateString('fr-FR')}</span>
-                          <div className={`flex items-center gap-1 ${status.color}`}>
-                            <StatusIcon className="h-3.5 w-3.5" />
-                            <span className="text-xs">{status.fr}</span>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <span className="text-xs text-muted-foreground">{new Date(obs.date).toLocaleDateString('fr-FR')}</span>
+                            <div className={`flex items-center gap-1 ${status.color}`}>
+                              <StatusIcon className="h-3.5 w-3.5" />
+                              <span className="text-xs">{status.fr}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="new">
@@ -366,10 +433,12 @@ const ObservationsModule: React.FC = () => {
               </div>
 
               <div className="flex gap-3 pt-2">
-                <Button onClick={() => handleSubmit(false)} disabled={!form.studentName || !form.description || !form.context}>
+                <Button onClick={() => handleSubmit(false)} disabled={!form.studentName || !form.description || !form.context || isSubmitting}>
+                  {isSubmitting ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
                   Soumettre l'observation
                 </Button>
-                <Button variant="outline" onClick={() => handleSubmit(true)} disabled={!form.studentName || !form.description}>
+                <Button variant="outline" onClick={() => handleSubmit(true)} disabled={!form.studentName || !form.description || isSubmitting}>
+                  {isSubmitting ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
                   Enregistrer comme brouillon
                 </Button>
                 <Button variant="ghost" onClick={() => { setShowForm(false); setActiveTab('list'); }}>Annuler</Button>

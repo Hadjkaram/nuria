@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,8 +13,10 @@ import { Separator } from '@/components/ui/separator';
 import {
   Database, Search, Download, RefreshCw, Shield, AlertTriangle, Info,
   CheckCircle2, XCircle, User, Clock, Filter, Eye, Activity,
-  LogIn, LogOut, Edit, Trash2, Plus, Settings, FileText, Globe
+  LogIn, LogOut, Edit, Trash2, Plus, Settings, FileText, Globe, Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 const labels: Record<string, Record<string, string>> = {
   title: { fr: 'Logs & Audit', en: 'Logs & Audit', pt: 'Logs e Auditoria', ar: 'السجلات والتدقيق' },
@@ -63,7 +65,7 @@ interface LogEntry {
   category: 'activity' | 'security' | 'system';
 }
 
-const actionIcons: Record<ActionType, React.ReactNode> = {
+const actionIcons: Record<string, React.ReactNode> = {
   login: <LogIn className="h-4 w-4" />,
   logout: <LogOut className="h-4 w-4" />,
   create: <Plus className="h-4 w-4" />,
@@ -82,32 +84,60 @@ const severityConfig: Record<Severity, { variant: 'default' | 'secondary' | 'des
   critical: { variant: 'destructive', icon: <Shield className="h-3 w-3" /> },
 };
 
-const mockLogs: LogEntry[] = [
-  { id: '1', timestamp: '2026-03-11 14:32:05', user: 'Dr. Koné Aminata', role: 'professional', action: 'update', resource: 'Dossier #1245', details: 'Mise à jour du plan de soins pour enfant Diallo M.', severity: 'info', ip: '192.168.1.45', status: 'success', category: 'activity' },
-  { id: '2', timestamp: '2026-03-11 14:28:12', user: 'Admin Principal', role: 'superAdmin', action: 'config', resource: 'Module Screening', details: 'Activation du module TDAH pour organisation CSC-Abobo', severity: 'warning', ip: '10.0.0.1', status: 'success', category: 'system' },
-  { id: '3', timestamp: '2026-03-11 14:15:33', user: 'unknown', role: 'unknown', action: 'login', resource: 'Auth', details: 'Tentative de connexion échouée - compte verrouillé', severity: 'error', ip: '85.123.45.67', status: 'failure', category: 'security' },
-  { id: '4', timestamp: '2026-03-11 13:55:00', user: 'Mme Touré Fatoumata', role: 'parent', action: 'view', resource: 'Résultats dépistage', details: 'Consultation des résultats ASQ-3 pour enfant Touré I.', severity: 'info', ip: '192.168.1.102', status: 'success', category: 'activity' },
-  { id: '5', timestamp: '2026-03-11 13:42:18', user: 'Prof. Diarra Moussa', role: 'teacher', action: 'create', resource: 'Observation', details: 'Nouvelle observation créée pour élève Camara A.', severity: 'success', ip: '172.16.0.55', status: 'success', category: 'activity' },
-  { id: '6', timestamp: '2026-03-11 13:30:44', user: 'Admin Principal', role: 'superAdmin', action: 'delete', resource: 'Utilisateur #87', details: 'Suppression du compte utilisateur inactif', severity: 'warning', ip: '10.0.0.1', status: 'success', category: 'system' },
-  { id: '7', timestamp: '2026-03-11 13:15:22', user: 'unknown', role: 'unknown', action: 'login', resource: 'Auth', details: 'Attaque par force brute détectée - 15 tentatives', severity: 'critical', ip: '203.45.67.89', status: 'failure', category: 'security' },
-  { id: '8', timestamp: '2026-03-11 12:50:10', user: 'Dr. Ouattara Ibrahim', role: 'professional', action: 'export', resource: 'Rapport mensuel', details: 'Export PDF des statistiques mensuelles', severity: 'info', ip: '192.168.1.78', status: 'success', category: 'activity' },
-  { id: '9', timestamp: '2026-03-11 12:30:55', user: 'Coordo. Bamba Aïcha', role: 'program', action: 'view', resource: 'Indicateurs nationaux', details: 'Consultation du tableau de bord programme', severity: 'info', ip: '10.0.1.22', status: 'success', category: 'activity' },
-  { id: '10', timestamp: '2026-03-11 12:10:00', user: 'Système', role: 'system', action: 'config', resource: 'Backup', details: 'Sauvegarde automatique de la base de données', severity: 'success', ip: '127.0.0.1', status: 'success', category: 'system' },
-  { id: '11', timestamp: '2026-03-11 11:45:30', user: 'Admin Principal', role: 'superAdmin', action: 'update', resource: 'Rôles & Permissions', details: 'Modification des permissions du rôle Enseignant', severity: 'warning', ip: '10.0.0.1', status: 'success', category: 'security' },
-  { id: '12', timestamp: '2026-03-11 11:20:15', user: 'Dr. Koné Aminata', role: 'professional', action: 'login', resource: 'Auth', details: 'Connexion réussie via 2FA', severity: 'success', ip: '192.168.1.45', status: 'success', category: 'security' },
-];
-
 const LogsModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { toast } = useToast();
   const t = (key: string) => labels[key]?.[lang] || labels[key]?.['fr'] || key;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState('all');
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
+  
+  const [logs, setLogs] = useState<LogEntry[]>([]); // <-- INITIALISÉ À VIDE
+  const [isLoading, setIsLoading] = useState(true);
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchLogs = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('system_logs')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(500); // On limite pour les performances
+
+      if (error) throw error;
+
+      if (data) {
+        const formattedLogs: LogEntry[] = data.map(d => ({
+          id: d.id,
+          timestamp: new Date(d.timestamp).toLocaleString(lang === 'ar' ? 'ar-SA' : lang === 'pt' ? 'pt-BR' : lang === 'en' ? 'en-US' : 'fr-FR'),
+          user: d.user_name,
+          role: d.role,
+          action: d.action as ActionType,
+          resource: d.resource,
+          details: d.details,
+          severity: d.severity as Severity,
+          ip: d.ip || '0.0.0.0',
+          status: d.status as 'success' | 'failure',
+          category: d.category as 'activity' | 'security' | 'system'
+        }));
+        setLogs(formattedLogs);
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les logs.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, [lang]);
 
   const filterLogs = (category: string) => {
-    return mockLogs.filter(log => {
+    return logs.filter(log => {
       const matchCategory = category === 'all' || log.category === category;
       const matchSearch = searchTerm === '' ||
         log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -120,13 +150,13 @@ const LogsModule: React.FC = () => {
   };
 
   const stats = {
-    total: mockLogs.length,
-    security: mockLogs.filter(l => l.category === 'security').length,
-    logins: mockLogs.filter(l => l.action === 'login').length,
-    errors: mockLogs.filter(l => l.severity === 'error' || l.severity === 'critical').length,
+    total: logs.length,
+    security: logs.filter(l => l.category === 'security').length,
+    logins: logs.filter(l => l.action === 'login').length,
+    errors: logs.filter(l => l.severity === 'error' || l.severity === 'critical').length,
   };
 
-  const LogTable = ({ logs }: { logs: LogEntry[] }) => (
+  const LogTable = ({ displayLogs }: { displayLogs: LogEntry[] }) => (
     <Table>
       <TableHeader>
         <TableRow>
@@ -140,12 +170,16 @@ const LogsModule: React.FC = () => {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {logs.map(log => (
+        {displayLogs.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">Aucun log trouvé.</TableCell>
+          </TableRow>
+        ) : displayLogs.map(log => (
           <TableRow key={log.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLog(log)}>
             <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap">{log.timestamp}</TableCell>
             <TableCell>
-              <Badge variant={severityConfig[log.severity].variant} className="gap-1">
-                {severityConfig[log.severity].icon}
+              <Badge variant={severityConfig[log.severity]?.variant || 'outline'} className="gap-1">
+                {severityConfig[log.severity]?.icon}
                 {t(log.severity)}
               </Badge>
             </TableCell>
@@ -157,7 +191,7 @@ const LogsModule: React.FC = () => {
             </TableCell>
             <TableCell>
               <div className="flex items-center gap-1 text-foreground">
-                {actionIcons[log.action]}
+                {actionIcons[log.action] || <Activity className="h-4 w-4" />}
                 <span className="text-sm capitalize">{log.action}</span>
               </div>
             </TableCell>
@@ -189,8 +223,8 @@ const LogsModule: React.FC = () => {
             <p className="text-muted-foreground mt-1">{t('subtitle')}</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-1" /> {t('refresh')}
+            <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading}>
+              <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? 'animate-spin' : ''}`} /> {t('refresh')}
             </Button>
             <Button variant="outline" size="sm">
               <Download className="h-4 w-4 mr-1" /> {t('export')}
@@ -272,29 +306,33 @@ const LogsModule: React.FC = () => {
         </Card>
 
         {/* Tabs */}
-        <Tabs defaultValue="activity">
-          <TabsList>
-            <TabsTrigger value="activity">{t('tabActivity')}</TabsTrigger>
-            <TabsTrigger value="security">{t('tabSecurity')}</TabsTrigger>
-            <TabsTrigger value="system">{t('tabSystem')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="activity">
-            <Card><CardContent className="p-0"><LogTable logs={filterLogs('activity')} /></CardContent></Card>
-          </TabsContent>
-          <TabsContent value="security">
-            <Card><CardContent className="p-0"><LogTable logs={filterLogs('security')} /></CardContent></Card>
-          </TabsContent>
-          <TabsContent value="system">
-            <Card><CardContent className="p-0"><LogTable logs={filterLogs('system')} /></CardContent></Card>
-          </TabsContent>
-        </Tabs>
+        {isLoading ? (
+          <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        ) : (
+          <Tabs defaultValue="activity">
+            <TabsList>
+              <TabsTrigger value="activity">{t('tabActivity')}</TabsTrigger>
+              <TabsTrigger value="security">{t('tabSecurity')}</TabsTrigger>
+              <TabsTrigger value="system">{t('tabSystem')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="activity">
+              <Card><CardContent className="p-0"><LogTable displayLogs={filterLogs('activity')} /></CardContent></Card>
+            </TabsContent>
+            <TabsContent value="security">
+              <Card><CardContent className="p-0"><LogTable displayLogs={filterLogs('security')} /></CardContent></Card>
+            </TabsContent>
+            <TabsContent value="system">
+              <Card><CardContent className="p-0"><LogTable displayLogs={filterLogs('system')} /></CardContent></Card>
+            </TabsContent>
+          </Tabs>
+        )}
 
         {/* Detail Dialog */}
-        <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>
+        <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                {selectedLog && actionIcons[selectedLog.action]}
+                {selectedLog && (actionIcons[selectedLog.action] || <Activity className="h-4 w-4" />)}
                 {t('details')}
               </DialogTitle>
             </DialogHeader>
@@ -307,8 +345,8 @@ const LogsModule: React.FC = () => {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">{t('severity')}</p>
-                    <Badge variant={severityConfig[selectedLog.severity].variant} className="gap-1">
-                      {severityConfig[selectedLog.severity].icon} {t(selectedLog.severity)}
+                    <Badge variant={severityConfig[selectedLog.severity]?.variant || 'outline'} className="gap-1">
+                      {severityConfig[selectedLog.severity]?.icon} {t(selectedLog.severity)}
                     </Badge>
                   </div>
                   <div>

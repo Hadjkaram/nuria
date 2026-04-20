@@ -5,6 +5,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import nuriaLogo from '@/assets/nuria-logo.png';
+// Import pour accéder directement à la db si besoin après le login
+import { supabase } from '@/lib/supabase';
 
 const LoginPage: React.FC = () => {
   const { t } = useLanguage();
@@ -20,10 +22,43 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const success = await login(email, password);
-    setLoading(false);
-    if (success) navigate('/dashboard');
-    else setError('Email ou mot de passe incorrect');
+
+    try {
+      // 1. Tente de connecter l'utilisateur via le context Auth
+      const success = await login(email, password);
+
+      if (success) {
+        // 2. Si la connexion réussit, on va chercher son rôle dans la table profiles
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single();
+
+          // 3. Redirection intelligente basée sur le rôle
+          if (profile?.role === 'parent') {
+            navigate('/parent-dashboard');
+          } else if (profile?.role === 'agent') {
+            navigate('/dashboard'); // Ou '/agent-dashboard' si tu as séparé les routes
+          } else {
+             // Redirection par défaut (Médecins, Superviseurs, etc.)
+            navigate('/dashboard');
+          }
+        } else {
+            navigate('/dashboard'); // Sécurité
+        }
+      } else {
+        setError('Email ou mot de passe incorrect');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Une erreur est survenue lors de la connexion.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -95,8 +130,8 @@ const LoginPage: React.FC = () => {
             </div>
 
             <Button type="submit" size="lg" className="w-full" disabled={loading}>
-              <LogIn size={18} />
-              {loading ? '...' : 'Se connecter'}
+              <LogIn size={18} className="mr-2" />
+              {loading ? 'Connexion...' : 'Se connecter'}
             </Button>
 
             <p className="text-center text-sm text-muted-foreground">
@@ -109,12 +144,10 @@ const LoginPage: React.FC = () => {
 
           {/* Demo accounts */}
           <div className="mt-10 border-t border-border pt-6">
-            <p className="text-xs text-muted-foreground text-center mb-3">Comptes démo (mot de passe: demo123)</p>
+            <p className="text-xs text-muted-foreground text-center mb-3">Comptes démo</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span>parent@nuria.app</span><span>pro@nuria.app</span>
-              <span>teacher@nuria.app</span><span>community@nuria.app</span>
-              <span>org@nuria.app</span><span>program@nuria.app</span>
-              <span>ministry@nuria.app</span><span>admin@nuria.app</span>
+              <span>parent.koffi@email.com</span><span>medecin@nuria.app</span>
+              <span>agent@nuria.app</span><span>admin@nuria.app</span>
             </div>
           </div>
         </div>

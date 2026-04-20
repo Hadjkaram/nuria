@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -6,16 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Activity, Search, Plus, Calendar, MapPin, Users, Clock, CheckCircle2,
-  AlertCircle, Filter, Eye, Edit, Trash2, BarChart3, TrendingUp,
-  Home, ClipboardList, UserCheck, Target, Play, Pause, ChevronRight
+  AlertCircle, Filter, Trash2, Play, Home, ClipboardList, UserCheck, Target, Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 
 type ActivityType = 'all' | 'home_visit' | 'screening_campaign' | 'awareness' | 'training' | 'community_meeting' | 'follow_up';
 type ActivityStatus = 'all' | 'planned' | 'in_progress' | 'completed' | 'cancelled';
@@ -31,66 +31,13 @@ interface ActivityItem {
   area: string;
   responsible: string;
   participants: number;
-  targetParticipants: number;
+  target_participants: number; // Modifié pour correspondre à Supabase (snake_case)
   description: string;
   outcomes?: string;
   families?: number;
-  childrenScreened?: number;
-  createdAt: string;
+  children_screened?: number; // Modifié pour correspondre à Supabase (snake_case)
+  created_at: string; // Modifié pour correspondre à Supabase (snake_case)
 }
-
-const mockActivities: ActivityItem[] = [
-  {
-    id: '1', title: 'Campagne de dépistage – Abobo Nord', type: 'screening_campaign', status: 'completed',
-    date: '2026-03-08', time: '08:00 - 14:00', location: 'Centre communautaire Abobo Nord', area: 'Abobo',
-    responsible: 'Équipe terrain Alpha', participants: 45, targetParticipants: 50,
-    description: 'Dépistage développemental des enfants de 0-5 ans dans le quartier Anador.',
-    outcomes: '45 enfants dépistés, 8 cas suspects identifiés, 5 orientations effectuées.',
-    families: 38, childrenScreened: 45, createdAt: '2026-02-25'
-  },
-  {
-    id: '2', title: 'Visite à domicile – Famille Traoré', type: 'home_visit', status: 'completed',
-    date: '2026-03-07', time: '10:00 - 11:30', location: 'Domicile famille Traoré', area: 'Abobo',
-    responsible: 'Koné Safiatou', participants: 1, targetParticipants: 1,
-    description: 'Suivi de Seydou (retard de langage) et évaluation de Mariam.',
-    outcomes: 'Recommandation de consultation spécialisée pour Mariam.', families: 1, createdAt: '2026-03-05'
-  },
-  {
-    id: '3', title: 'Sensibilisation – Marché de Yopougon', type: 'awareness', status: 'in_progress',
-    date: '2026-03-10', time: '09:00 - 16:00', location: 'Grand marché de Yopougon', area: 'Yopougon',
-    responsible: 'Équipe terrain Beta', participants: 120, targetParticipants: 200,
-    description: 'Journée de sensibilisation sur le développement de l\'enfant et les signes d\'alerte.',
-    createdAt: '2026-03-01'
-  },
-  {
-    id: '4', title: 'Réunion communautaire – Leaders Cocody', type: 'community_meeting', status: 'planned',
-    date: '2026-03-14', time: '15:00 - 17:00', location: 'Mairie de Cocody', area: 'Cocody',
-    responsible: 'Diallo Ibrahim', participants: 0, targetParticipants: 25,
-    description: 'Présentation du programme aux leaders communautaires et chefs de quartier.',
-    createdAt: '2026-03-06'
-  },
-  {
-    id: '5', title: 'Formation agents relais – Module 2', type: 'training', status: 'planned',
-    date: '2026-03-18', time: '09:00 - 17:00', location: 'Salle de formation NURIA', area: 'Plateau',
-    responsible: 'Dr. Konaté', participants: 0, targetParticipants: 15,
-    description: 'Formation sur l\'utilisation des outils de dépistage ASQ-3 et M-CHAT.',
-    createdAt: '2026-03-08'
-  },
-  {
-    id: '6', title: 'Suivi post-orientation – Quartier Sicogi', type: 'follow_up', status: 'planned',
-    date: '2026-03-12', time: '09:00 - 12:00', location: 'Quartier Sicogi, Yopougon', area: 'Yopougon',
-    responsible: 'Koné Safiatou', participants: 0, targetParticipants: 6,
-    description: 'Suivi des familles orientées le mois dernier pour vérifier la prise en charge.',
-    families: 6, createdAt: '2026-03-09'
-  },
-  {
-    id: '7', title: 'Campagne de dépistage – Adjamé', type: 'screening_campaign', status: 'cancelled',
-    date: '2026-03-03', time: '08:00 - 14:00', location: 'Maternité d\'Adjamé', area: 'Adjamé',
-    responsible: 'Équipe terrain Alpha', participants: 0, targetParticipants: 40,
-    description: 'Reportée en raison de l\'indisponibilité du lieu.',
-    createdAt: '2026-02-20'
-  },
-];
 
 const typeConfig: Record<string, { label: Record<string, string>; icon: React.ElementType; color: string }> = {
   home_visit: { label: { fr: 'Visite à domicile', en: 'Home visit', pt: 'Visita domiciliar', ar: 'زيارة منزلية' }, icon: Home, color: 'text-blue-500' },
@@ -111,21 +58,59 @@ const statusConfig: Record<string, { label: Record<string, string>; style: strin
 const ActivitiesModule: React.FC = () => {
   const { lang } = useLanguage();
   const { user } = useAuth();
+  const { toast } = useToast();
+  
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<ActivityType>('all');
   const [statusFilter, setStatusFilter] = useState<ActivityStatus>('all');
-  const [activities, setActivities] = useState<ActivityItem[]>(mockActivities);
+  
+  // NOUVEAUX ÉTATS POUR SUPABASE
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newActivity, setNewActivity] = useState({
     title: '', type: 'home_visit' as ActivityType, date: '', time: '', location: '', area: '', description: '', targetParticipants: '',
   });
 
+  // RÉCUPÉRATION DES DONNÉES EN TEMPS RÉEL
+  const fetchActivities = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('activities')
+        .select('*')
+        .eq('agent_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setActivities(data || []);
+      
+      // Mettre à jour l'activité sélectionnée si elle a été modifiée
+      if (selectedActivity) {
+        const updatedSelected = data?.find(a => a.id === selectedActivity.id);
+        if (updatedSelected) setSelectedActivity(updatedSelected);
+      }
+    } catch (error) {
+      console.error("Erreur chargement activités", error);
+      toast({ title: "Erreur", description: "Impossible de charger les activités.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActivities();
+  }, [user]);
+
   const filtered = activities.filter(a => {
     const matchSearch = a.title.toLowerCase().includes(search.toLowerCase()) ||
-      a.location.toLowerCase().includes(search.toLowerCase()) ||
-      a.area.toLowerCase().includes(search.toLowerCase()) ||
-      a.responsible.toLowerCase().includes(search.toLowerCase());
+      (a.location && a.location.toLowerCase().includes(search.toLowerCase())) ||
+      (a.area && a.area.toLowerCase().includes(search.toLowerCase())) ||
+      (a.responsible && a.responsible.toLowerCase().includes(search.toLowerCase()));
     const matchType = typeFilter === 'all' || a.type === typeFilter;
     const matchStatus = statusFilter === 'all' || a.status === statusFilter;
     return matchSearch && matchType && matchStatus;
@@ -136,33 +121,67 @@ const ActivitiesModule: React.FC = () => {
     planned: activities.filter(a => a.status === 'planned').length,
     inProgress: activities.filter(a => a.status === 'in_progress').length,
     completed: activities.filter(a => a.status === 'completed').length,
-    totalParticipants: activities.reduce((s, a) => s + a.participants, 0),
-    totalScreened: activities.reduce((s, a) => s + (a.childrenScreened || 0), 0),
+    totalParticipants: activities.reduce((s, a) => s + (a.participants || 0), 0),
+    totalScreened: activities.reduce((s, a) => s + (a.children_screened || 0), 0),
   };
 
-  const handleCreate = () => {
+  // SAUVEGARDE DANS SUPABASE
+  const handleCreate = async () => {
     if (!newActivity.title.trim() || !newActivity.date) return;
-    const activity: ActivityItem = {
-      id: Date.now().toString(), title: newActivity.title, type: newActivity.type,
-      status: 'planned', date: newActivity.date, time: newActivity.time,
-      location: newActivity.location, area: newActivity.area,
-      responsible: user ? `${user.firstName} ${user.lastName}` : 'Moi',
-      participants: 0, targetParticipants: parseInt(newActivity.targetParticipants) || 0,
-      description: newActivity.description, createdAt: new Date().toISOString().split('T')[0],
-    };
-    setActivities(prev => [activity, ...prev]);
-    setNewActivity({ title: '', type: 'home_visit', date: '', time: '', location: '', area: '', description: '', targetParticipants: '' });
-    setShowCreate(false);
+    setIsSaving(true);
+    
+    try {
+      const { error } = await supabase.from('activities').insert([{
+        agent_id: user?.id,
+        title: newActivity.title,
+        type: newActivity.type,
+        status: 'planned',
+        date: newActivity.date,
+        time: newActivity.time,
+        location: newActivity.location,
+        area: newActivity.area,
+        responsible: user ? `${user.firstName} ${user.lastName}` : 'Moi',
+        target_participants: parseInt(newActivity.targetParticipants) || 0,
+        description: newActivity.description
+      }]);
+
+      if (error) throw error;
+      
+      toast({ title: "Succès", description: "Activité planifiée avec succès." });
+      setNewActivity({ title: '', type: 'home_visit', date: '', time: '', location: '', area: '', description: '', targetParticipants: '' });
+      setShowCreate(false);
+      fetchActivities(); // Rafraîchir la liste
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const updateStatus = (id: string, status: ActivityStatus) => {
-    setActivities(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-    if (selectedActivity?.id === id) setSelectedActivity(prev => prev ? { ...prev, status } : null);
+  // MISE À JOUR STATUT DANS SUPABASE
+  const updateStatus = async (id: string, status: ActivityStatus) => {
+    try {
+      const { error } = await supabase.from('activities').update({ status }).eq('id', id);
+      if (error) throw error;
+      fetchActivities();
+    } catch (error: any) {
+      toast({ title: "Erreur", description: "Mise à jour impossible.", variant: "destructive" });
+    }
   };
 
-  const deleteActivity = (id: string) => {
-    setActivities(prev => prev.filter(a => a.id !== id));
-    if (selectedActivity?.id === id) setSelectedActivity(null);
+  // SUPPRESSION DANS SUPABASE
+  const deleteActivity = async (id: string) => {
+    if(!window.confirm("Voulez-vous vraiment supprimer cette activité ?")) return;
+    try {
+      const { error } = await supabase.from('activities').delete().eq('id', id);
+      if (error) throw error;
+      
+      if (selectedActivity?.id === id) setSelectedActivity(null);
+      toast({ title: "Activité supprimée" });
+      fetchActivities();
+    } catch (error: any) {
+      toast({ title: "Erreur", description: "Suppression impossible.", variant: "destructive" });
+    }
   };
 
   const l = {
@@ -236,8 +255,11 @@ const ActivitiesModule: React.FC = () => {
                   <Textarea value={newActivity.description} onChange={e => setNewActivity(p => ({ ...p, description: e.target.value }))} className="mt-1" rows={3} />
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setShowCreate(false)}>{l.cancel}</Button>
-                  <Button onClick={handleCreate}>{l.create}</Button>
+                  <Button variant="outline" onClick={() => setShowCreate(false)} disabled={isSaving}>{l.cancel}</Button>
+                  <Button onClick={handleCreate} disabled={isSaving}>
+                    {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {l.create}
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -296,12 +318,14 @@ const ActivitiesModule: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Activity list */}
           <div className="lg:col-span-2 space-y-3">
-            {filtered.length === 0 ? (
+            {isLoading ? (
+               <Card><CardContent className="p-12 text-center flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></CardContent></Card>
+            ) : filtered.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground"><Activity className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{l.noResults}</p></CardContent></Card>
             ) : filtered.map(activity => {
               const typeCfg = typeConfig[activity.type];
               const Icon = typeCfg?.icon || Activity;
-              const progressPercent = activity.targetParticipants > 0 ? Math.round((activity.participants / activity.targetParticipants) * 100) : 0;
+              const progressPercent = activity.target_participants > 0 ? Math.round((activity.participants / activity.target_participants) * 100) : 0;
 
               return (
                 <Card
@@ -326,9 +350,9 @@ const ActivitiesModule: React.FC = () => {
                           <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{activity.date}</span>
                           {activity.time && <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{activity.time}</span>}
                           <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{activity.area}</span>
-                          <span className="flex items-center gap-1"><Users className="h-3 w-3" />{activity.participants}/{activity.targetParticipants}</span>
+                          <span className="flex items-center gap-1"><Users className="h-3 w-3" />{activity.participants}/{activity.target_participants}</span>
                         </div>
-                        {activity.status !== 'cancelled' && activity.targetParticipants > 0 && (
+                        {activity.status !== 'cancelled' && activity.target_participants > 0 && (
                           <div className="mt-2">
                             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                               <div
@@ -351,8 +375,8 @@ const ActivitiesModule: React.FC = () => {
             {selectedActivity ? (() => {
               const typeCfg = typeConfig[selectedActivity.type];
               const Icon = typeCfg?.icon || Activity;
-              const progressPercent = selectedActivity.targetParticipants > 0
-                ? Math.round((selectedActivity.participants / selectedActivity.targetParticipants) * 100) : 0;
+              const progressPercent = selectedActivity.target_participants > 0
+                ? Math.round((selectedActivity.participants / selectedActivity.target_participants) * 100) : 0;
 
               return (
                 <Card className="sticky top-20">
@@ -377,7 +401,7 @@ const ActivitiesModule: React.FC = () => {
                     </div>
 
                     {/* Progress */}
-                    {selectedActivity.targetParticipants > 0 && (
+                    {selectedActivity.target_participants > 0 && (
                       <div className="bg-muted/50 rounded-lg p-3">
                         <div className="flex justify-between text-sm mb-2">
                           <span className="text-muted-foreground">{l.progress}</span>
@@ -386,12 +410,12 @@ const ActivitiesModule: React.FC = () => {
                         <div className="h-2 bg-background rounded-full overflow-hidden">
                           <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">{selectedActivity.participants} / {selectedActivity.targetParticipants} {l.participants.toLowerCase()}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{selectedActivity.participants} / {selectedActivity.target_participants} {l.participants.toLowerCase()}</p>
                       </div>
                     )}
 
                     {/* Key metrics */}
-                    {(selectedActivity.families || selectedActivity.childrenScreened) && (
+                    {(selectedActivity.families || selectedActivity.children_screened) && (
                       <div className="grid grid-cols-2 gap-2">
                         {selectedActivity.families != null && (
                           <div className="bg-muted/50 rounded-lg p-3 text-center">
@@ -399,9 +423,9 @@ const ActivitiesModule: React.FC = () => {
                             <p className="text-xs text-muted-foreground">{l.families}</p>
                           </div>
                         )}
-                        {selectedActivity.childrenScreened != null && (
+                        {selectedActivity.children_screened != null && (
                           <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <p className="text-lg font-bold text-foreground">{selectedActivity.childrenScreened}</p>
+                            <p className="text-lg font-bold text-foreground">{selectedActivity.children_screened}</p>
                             <p className="text-xs text-muted-foreground">{l.screened}</p>
                           </div>
                         )}

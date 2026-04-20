@@ -10,6 +10,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ClipboardList, ChevronRight, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 // --- Types ---
 interface Questionnaire {
@@ -25,6 +26,7 @@ interface Questionnaire {
 const QuestionnairesModule: React.FC = () => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { toast } = useToast(); // <-- AJOUT
   
   const [children, setChildren] = useState<any[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string>('');
@@ -32,50 +34,62 @@ const QuestionnairesModule: React.FC = () => {
   const [activeQuestionnaire, setActiveQuestionnaire] = useState<Questionnaire | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Liste des questionnaires
+  // Liste des questionnaires (Catalogue fixe d'outils cliniques)
   const questionnaires: Questionnaire[] = [
     { id: 'asq-6', title: 'ASQ-3 (6 mois)', description: 'Dépistage du développement global', ageRange: '6 mois', domain: 'Développement', questionCount: 30, status: 'not_started' },
     { id: 'm-chat', title: 'M-CHAT-R', description: 'Repérage précoce de l\'autisme', ageRange: '16-30 mois', domain: 'Autisme', questionCount: 20, status: 'not_started' },
   ];
 
-  // Charger les enfants
+  // Charger les enfants depuis Supabase
   useEffect(() => {
     const fetchChildren = async () => {
-      const { data } = await supabase.from('children').select('id, first_name, last_name');
-      if (data) setChildren(data);
+      try {
+        const { data, error } = await supabase
+          .from('children')
+          .select('id, first_name, last_name')
+          .order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        if (data) setChildren(data);
+      } catch (err: any) {
+        toast({ title: "Erreur", description: "Impossible de charger la liste des enfants.", variant: "destructive" });
+      }
     };
     fetchChildren();
-  }, []);
+  }, [toast]);
 
   const handleStartRequest = (q: Questionnaire) => {
     setActiveQuestionnaire(q);
     setShowStartDialog(true);
   };
 
+  // --- CRÉATION DE L'ÉVALUATION EN DB (Sans fausses données) ---
   const completeQuestionnaire = async () => {
     if (!selectedChildId || !activeQuestionnaire || !user) return;
     setIsSaving(true);
+    
     try {
-      const score = Math.floor(Math.random() * 100);
-      const risk = score > 70 ? 'low' : score > 40 ? 'medium' : 'high';
-
+      // On initialise l'évaluation avec un score de 0 et un statut "in_progress" (Zéro fausse donnée)
       const { error } = await supabase.from('questionnaire_results').insert([
         {
           child_id: selectedChildId,
           user_id: user.id,
           title: activeQuestionnaire.title,
           domain: activeQuestionnaire.domain,
-          score: score,
-          max_score: 100,
-          risk_level: risk,
-          status: 'completed'
+          score: 0,
+          max_score: activeQuestionnaire.questionCount,
+          risk_level: 'pending',
+          status: 'in_progress'
         }
       ]);
 
       if (error) throw error;
+      
+      toast({ title: "Succès", description: "L'évaluation a été initialisée avec succès." });
       setShowStartDialog(false);
-    } catch (error) {
-      console.error(error);
+      setSelectedChildId(''); // Reset
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -120,18 +134,22 @@ const QuestionnairesModule: React.FC = () => {
                   <SelectValue placeholder="Choisir un enfant..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {children.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.first_name} {c.last_name}
-                    </SelectItem>
-                  ))}
+                  {children.length === 0 ? (
+                     <SelectItem value="none" disabled>Aucun enfant disponible</SelectItem>
+                  ) : (
+                    children.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.first_name} {c.last_name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
             
             <Button 
               className="w-full" 
-              disabled={!selectedChildId || isSaving} 
+              disabled={!selectedChildId || selectedChildId === 'none' || isSaving} 
               onClick={completeQuestionnaire}
             >
               {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}

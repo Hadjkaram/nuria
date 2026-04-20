@@ -101,14 +101,16 @@ const LandingPage: React.FC = () => {
                 Demander une démonstration
                 <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
               </Button>
+              
+              {/* CORRECTION : Bouton bleu au lieu de contour blanc */}
               <Button 
                 size="xl"
-                variant="outline" 
-                className="border-white/30 text-white hover:bg-white/10 text-base px-8 py-6 rounded-xl"
+                className="bg-[#0056A8] hover:bg-[#004080] text-white shadow-xl text-base px-8 py-6 rounded-xl border-none transition-all"
                 onClick={() => navigate('/login')}
               >
                 Se connecter
               </Button>
+              
               {/* NOUVEAU BOUTON : PORTAIL AGENT DE TERRAIN */}
               <Button 
                 size="xl"

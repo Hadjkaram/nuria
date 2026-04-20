@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext'; // <-- AJOUT
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,8 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   FileText, Search, Plus, Download, Eye, Trash2, Clock, FolderOpen,
   Upload, File, FileImage, FileSpreadsheet, Filter, SortAsc, Share2,
-  CheckCircle2, AlertCircle, Archive, Star, StarOff
+  CheckCircle2, AlertCircle, Archive, Star, StarOff, Loader2 // <-- AJOUT Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 type DocCategory = 'all' | 'clinical' | 'administrative' | 'report' | 'template' | 'consent';
 type DocStatus = 'all' | 'draft' | 'final' | 'archived' | 'pending_signature';
@@ -33,19 +36,6 @@ interface Document {
   starred: boolean;
   tags: string[];
 }
-
-const mockDocuments: Document[] = [
-  { id: '1', title: 'Rapport d\'évaluation - Amadou Diallo', category: 'clinical', status: 'final', type: 'PDF', size: '2.4 MB', author: 'Dr. Konaté', patient: 'Amadou Diallo', createdAt: '2026-03-08', updatedAt: '2026-03-08', starred: true, tags: ['évaluation', 'TDAH'] },
-  { id: '2', title: 'Plan de prise en charge - Fatou Bah', category: 'clinical', status: 'draft', type: 'DOCX', size: '1.1 MB', author: 'Dr. Konaté', patient: 'Fatou Bah', createdAt: '2026-03-07', updatedAt: '2026-03-09', starred: false, tags: ['PEC', 'autisme'] },
-  { id: '3', title: 'Formulaire de consentement parental', category: 'consent', status: 'pending_signature', type: 'PDF', size: '340 KB', author: 'Admin', patient: 'Moussa Traoré', createdAt: '2026-03-06', updatedAt: '2026-03-06', starred: false, tags: ['consentement'] },
-  { id: '4', title: 'Modèle - Compte rendu de séance', category: 'template', status: 'final', type: 'DOCX', size: '89 KB', author: 'Admin', createdAt: '2026-02-15', updatedAt: '2026-02-15', starred: true, tags: ['modèle', 'séance'] },
-  { id: '5', title: 'Rapport trimestriel Q1 2026', category: 'report', status: 'final', type: 'PDF', size: '5.7 MB', author: 'Dr. Konaté', createdAt: '2026-03-01', updatedAt: '2026-03-05', starred: false, tags: ['rapport', 'statistiques'] },
-  { id: '6', title: 'Attestation de suivi - Aïcha Sow', category: 'administrative', status: 'final', type: 'PDF', size: '210 KB', author: 'Admin', patient: 'Aïcha Sow', createdAt: '2026-03-04', updatedAt: '2026-03-04', starred: false, tags: ['attestation'] },
-  { id: '7', title: 'Bilan orthophonique - Ibrahima Camara', category: 'clinical', status: 'draft', type: 'PDF', size: '1.8 MB', author: 'Mme. Diarra', patient: 'Ibrahima Camara', createdAt: '2026-03-09', updatedAt: '2026-03-10', starred: false, tags: ['bilan', 'orthophonie'] },
-  { id: '8', title: 'Protocole de dépistage ASQ-3', category: 'template', status: 'final', type: 'PDF', size: '450 KB', author: 'Admin', createdAt: '2026-01-10', updatedAt: '2026-01-10', starred: true, tags: ['protocole', 'ASQ-3'] },
-  { id: '9', title: 'Note de synthèse multidisciplinaire', category: 'clinical', status: 'pending_signature', type: 'PDF', size: '920 KB', author: 'Dr. Konaté', patient: 'Amadou Diallo', createdAt: '2026-03-10', updatedAt: '2026-03-10', starred: false, tags: ['synthèse', 'équipe'] },
-  { id: '10', title: 'Rapport d\'activité annuel 2025', category: 'report', status: 'archived', type: 'PDF', size: '12.3 MB', author: 'Direction', createdAt: '2025-12-31', updatedAt: '2026-01-15', starred: false, tags: ['rapport', 'annuel'] },
-];
 
 const categoryLabels: Record<string, Record<string, string>> = {
   all: { fr: 'Tous', en: 'All', pt: 'Todos', ar: 'الكل' },
@@ -80,13 +70,54 @@ const fileIcons: Record<string, React.ReactNode> = {
 
 const DocumentsModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { user } = useAuth();
+  const { toast } = useToast();
+
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<DocCategory>('all');
   const [statusFilter, setStatusFilter] = useState<DocStatus>('all');
-  const [documents, setDocuments] = useState<Document[]>(mockDocuments);
+  const [documents, setDocuments] = useState<Document[]>([]); // <-- Vide au lieu des fausses données
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [newDoc, setNewDoc] = useState({ title: '', category: 'clinical' as DocCategory, description: '', patient: '' });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchDocuments = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('documents').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      
+      if (data) {
+        const formattedDocs: Document[] = data.map(d => ({
+          id: d.id,
+          title: d.title,
+          category: d.category as DocCategory,
+          status: d.status as DocStatus,
+          type: d.type,
+          size: d.size,
+          author: d.author,
+          patient: d.patient || undefined,
+          createdAt: new Date(d.created_at).toISOString().split('T')[0],
+          updatedAt: new Date(d.updated_at).toISOString().split('T')[0],
+          starred: d.starred,
+          tags: d.tags || []
+        }));
+        setDocuments(formattedDocs);
+      }
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Erreur", description: "Impossible de charger les documents.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocuments();
+  }, [user]);
 
   const filtered = documents.filter(d => {
     const matchSearch = d.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -105,42 +136,75 @@ const DocumentsModule: React.FC = () => {
     starred: documents.filter(d => d.starred).length,
   };
 
-  const toggleStar = (id: string) => {
-    setDocuments(prev => prev.map(d => d.id === id ? { ...d, starred: !d.starred } : d));
+  // --- 2. ACTIONS SUPABASE ---
+  const toggleStar = async (id: string) => {
+    const docToUpdate = documents.find(d => d.id === id);
+    if (!docToUpdate) return;
+    const newStarredStatus = !docToUpdate.starred;
+
+    // Mise à jour optimiste UI
+    setDocuments(prev => prev.map(d => d.id === id ? { ...d, starred: newStarredStatus } : d));
+    if (selectedDoc?.id === id) setSelectedDoc(prev => prev ? { ...prev, starred: newStarredStatus } : null);
+
+    // Mise à jour DB
+    await supabase.from('documents').update({ starred: newStarredStatus }).eq('id', id);
   };
 
-  const deleteDoc = (id: string) => {
+  const deleteDoc = async (id: string) => {
     setDocuments(prev => prev.filter(d => d.id !== id));
     if (selectedDoc?.id === id) setSelectedDoc(null);
+    
+    await supabase.from('documents').delete().eq('id', id);
+    toast({ title: "Supprimé", description: "Le document a été supprimé." });
   };
 
-  const archiveDoc = (id: string) => {
+  const archiveDoc = async (id: string) => {
     setDocuments(prev => prev.map(d => d.id === id ? { ...d, status: 'archived' as DocStatus } : d));
+    if (selectedDoc?.id === id) setSelectedDoc(prev => prev ? { ...prev, status: 'archived' } : null);
+
+    await supabase.from('documents').update({ status: 'archived' }).eq('id', id);
+    toast({ title: "Archivé", description: "Le document a été archivé." });
   };
 
-  const finalizeDoc = (id: string) => {
-    setDocuments(prev => prev.map(d => d.id === id ? { ...d, status: 'final' as DocStatus, updatedAt: new Date().toISOString().split('T')[0] } : d));
+  const finalizeDoc = async (id: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    setDocuments(prev => prev.map(d => d.id === id ? { ...d, status: 'final' as DocStatus, updatedAt: today } : d));
+    if (selectedDoc?.id === id) setSelectedDoc(prev => prev ? { ...prev, status: 'final' } : null);
+
+    await supabase.from('documents').update({ status: 'final', updated_at: new Date().toISOString() }).eq('id', id);
+    toast({ title: "Finalisé", description: "Le document est finalisé." });
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!newDoc.title.trim()) return;
-    const doc: Document = {
-      id: Date.now().toString(),
-      title: newDoc.title,
-      category: newDoc.category,
-      status: 'draft',
-      type: 'PDF',
-      size: '0 KB',
-      author: 'Moi',
-      patient: newDoc.patient || undefined,
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
-      starred: false,
-      tags: [],
-    };
-    setDocuments(prev => [doc, ...prev]);
-    setNewDoc({ title: '', category: 'clinical', description: '', patient: '' });
-    setShowUpload(false);
+    setIsSubmitting(true);
+
+    try {
+      const payload = {
+        user_id: user?.id,
+        title: newDoc.title,
+        category: newDoc.category,
+        status: 'draft',
+        type: 'PDF', // Simulons un PDF par défaut
+        size: '124 KB', // Simulé
+        author: user?.firstName ? `${user.firstName} ${user.lastName}` : 'Moi',
+        patient: newDoc.patient || null,
+        starred: false,
+        tags: []
+      };
+
+      const { error } = await supabase.from('documents').insert([payload]);
+      if (error) throw error;
+
+      setShowUpload(false);
+      setNewDoc({ title: '', category: 'clinical', description: '', patient: '' });
+      toast({ title: "Succès", description: "Document créé avec succès." });
+      fetchDocuments();
+    } catch (error: any) {
+      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const labels = {
@@ -200,7 +264,10 @@ const DocumentsModule: React.FC = () => {
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setShowUpload(false)}>{l.cancel}</Button>
-                  <Button onClick={handleUpload}>{l.create}</Button>
+                  <Button onClick={handleUpload} disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    {l.create}
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -255,7 +322,9 @@ const DocumentsModule: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Document list */}
           <div className="lg:col-span-2 space-y-2">
-            {filtered.length === 0 ? (
+            {isLoading ? (
+              <div className="flex justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+            ) : filtered.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground"><FileText className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{l.noResults}</p></CardContent></Card>
             ) : filtered.map(doc => (
               <Card
@@ -334,13 +403,13 @@ const DocumentsModule: React.FC = () => {
                       </Button>
                     </div>
                     {selectedDoc.status === 'draft' && (
-                      <Button size="sm" className="w-full text-xs" onClick={() => { finalizeDoc(selectedDoc.id); setSelectedDoc(prev => prev ? { ...prev, status: 'final' } : null); }}>
+                      <Button size="sm" className="w-full text-xs" onClick={() => finalizeDoc(selectedDoc.id)}>
                         <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{l.finalize}
                       </Button>
                     )}
                     <div className="flex gap-2">
                       {selectedDoc.status !== 'archived' && (
-                        <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => { archiveDoc(selectedDoc.id); setSelectedDoc(prev => prev ? { ...prev, status: 'archived' } : null); }}>
+                        <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => archiveDoc(selectedDoc.id)}>
                           <Archive className="h-3.5 w-3.5 mr-1" />{l.archive}
                         </Button>
                       )}

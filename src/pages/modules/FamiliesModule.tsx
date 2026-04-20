@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext'; // <-- AJOUT
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,8 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Users, Search, Plus, Phone, MapPin, Baby, Calendar, ArrowRightLeft,
   Home, AlertTriangle, CheckCircle2, Clock, Eye, Edit, MessageSquare,
-  UserPlus, ChevronRight, Activity, FileText, Heart
+  UserPlus, ChevronRight, Activity, FileText, Heart, Loader2 // <-- AJOUT Loader2
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase'; // <-- AJOUT
+import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
 
 type FamilyStatus = 'all' | 'active' | 'pending' | 'urgent' | 'referred' | 'closed';
 
@@ -51,67 +54,8 @@ interface Family {
   notes: string;
   createdAt: string;
   priority: boolean;
+  db_id?: string; // <-- AJOUT ID Supabase
 }
-
-const mockFamilies: Family[] = [
-  {
-    id: '1', name: 'Famille Traoré', parentName: 'Aminata Traoré', phone: '+225 07 12 34 56', area: 'Abobo', address: 'Quartier Anador, Abobo',
-    status: 'urgent', childrenCount: 2, lastVisit: '2026-03-05', nextVisit: '2026-03-12', notes: 'Famille en situation précaire, nécessite un suivi rapproché.', createdAt: '2025-11-10', priority: true,
-    children: [
-      { id: 'c1', name: 'Seydou Traoré', age: '2 ans 6 mois', concern: 'Retard de langage significatif', status: 'referred', referredTo: 'Centre de santé Abobo' },
-      { id: 'c2', name: 'Mariam Traoré', age: '4 ans', concern: 'Difficultés de socialisation', status: 'identified' },
-    ],
-    visits: [
-      { id: 'v1', date: '2026-03-05', type: 'Visite à domicile', notes: 'Mère présente, père absent. Seydou ne prononce que 3 mots.', outcome: 'Orientation vers orthophoniste' },
-      { id: 'v2', date: '2026-02-20', type: 'Suivi téléphonique', notes: 'La mère signale que Mariam refuse de jouer avec les autres enfants.', outcome: 'Visite programmée' },
-      { id: 'v3', date: '2026-02-05', type: 'Visite à domicile', notes: 'Premier contact avec la famille. Repérage initial effectué.', outcome: 'Fiche de repérage créée' },
-    ]
-  },
-  {
-    id: '2', name: 'Famille Ouattara', parentName: 'Fatou Ouattara', phone: '+225 05 98 76 54', area: 'Yopougon', address: 'Quartier Sicogi, Yopougon',
-    status: 'referred', childrenCount: 1, lastVisit: '2026-03-08', notes: 'Enfant orientée vers spécialiste.', createdAt: '2026-01-15', priority: false,
-    children: [
-      { id: 'c3', name: 'Aya Ouattara', age: '18 mois', concern: 'Pas de babillage, contact visuel pauvre', status: 'referred', referredTo: 'Hôpital Cocody – Pédiatrie' },
-    ],
-    visits: [
-      { id: 'v4', date: '2026-03-08', type: 'Visite à domicile', notes: 'Suivi post-orientation. La mère attend le RDV au CHU.', outcome: 'Relance prévue' },
-      { id: 'v5', date: '2026-02-25', type: 'Visite à domicile', notes: 'Aya ne réagit pas au prénom. Recommandation d\'évaluation spécialisée.', outcome: 'Orientation effectuée' },
-    ]
-  },
-  {
-    id: '3', name: 'Famille Diallo', parentName: 'Ibrahim Diallo', phone: '+225 01 23 45 67', area: 'Cocody', address: 'Riviera 2, Cocody',
-    status: 'active', childrenCount: 3, lastVisit: '2026-03-02', nextVisit: '2026-03-15', notes: 'Famille coopérative, bon suivi.', createdAt: '2025-09-20', priority: false,
-    children: [
-      { id: 'c4', name: 'Mamadou Diallo', age: '3 ans', concern: 'Isolement social, mouvements répétitifs', status: 'in_care', referredTo: 'CAMSP Yopougon' },
-      { id: 'c5', name: 'Kadiatou Diallo', age: '5 ans', concern: 'RAS - suivi préventif', status: 'follow_up' },
-      { id: 'c6', name: 'Ousmane Diallo', age: '8 mois', concern: 'Suivi développemental', status: 'follow_up' },
-    ],
-    visits: [
-      { id: 'v6', date: '2026-03-02', type: 'Visite à domicile', notes: 'Mamadou progresse bien en thérapie. Les parents appliquent les recommandations.', outcome: 'Poursuite du suivi' },
-    ]
-  },
-  {
-    id: '4', name: 'Famille Koné', parentName: 'Safiatou Koné', phone: '+225 07 65 43 21', area: 'Adjamé', address: 'Quartier Liberté, Adjamé',
-    status: 'pending', childrenCount: 1, lastVisit: '2026-02-28', notes: 'En attente de premier rendez-vous.', createdAt: '2026-02-28', priority: false,
-    children: [
-      { id: 'c7', name: 'Moussa Koné', age: '14 mois', concern: 'Ne se tient pas assis seul', status: 'identified' },
-    ],
-    visits: [
-      { id: 'v7', date: '2026-02-28', type: 'Repérage communautaire', notes: 'Signalé par le chef de quartier. La mère inquiète du développement moteur.', outcome: 'Visite planifiée' },
-    ]
-  },
-  {
-    id: '5', name: 'Famille Bamba', parentName: 'Rokia Bamba', phone: '+225 05 11 22 33', area: 'Marcory', address: 'Zone 4, Marcory',
-    status: 'closed', childrenCount: 2, lastVisit: '2026-01-15', notes: 'Suivi terminé. Les enfants ont atteint les jalons.', createdAt: '2025-06-01', priority: false,
-    children: [
-      { id: 'c8', name: 'Aminata Bamba', age: '4 ans', concern: 'Retard de langage - résolu', status: 'follow_up' },
-      { id: 'c9', name: 'Drissa Bamba', age: '6 ans', concern: 'RAS', status: 'follow_up' },
-    ],
-    visits: [
-      { id: 'v8', date: '2026-01-15', type: 'Visite de clôture', notes: 'Les deux enfants progressent normalement. Clôture du dossier.', outcome: 'Dossier clôturé' },
-    ]
-  },
-];
 
 const statusConfig: Record<string, { label: Record<string, string>; style: string; icon: React.ElementType }> = {
   active: { label: { fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, style: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: CheckCircle2 },
@@ -130,15 +74,60 @@ const childStatusConfig: Record<string, { label: Record<string, string>; style: 
 
 const FamiliesModule: React.FC = () => {
   const { lang } = useLanguage();
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [families, setFamilies] = useState<Family[]>([]); // <-- INITIALISATION VIDE
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<FamilyStatus>('all');
-  const [families, setFamilies] = useState<Family[]>(mockFamilies);
   const [selectedFamily, setSelectedFamily] = useState<Family | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [showNewFamily, setShowNewFamily] = useState(false);
   const [showAddVisit, setShowAddVisit] = useState(false);
   const [newFamily, setNewFamily] = useState({ name: '', parentName: '', phone: '', area: '', address: '', notes: '' });
   const [newVisit, setNewVisit] = useState({ type: 'Visite à domicile', notes: '', outcome: '' });
+
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  const fetchFamilies = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('families').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+
+      if (data) {
+        const formattedFamilies: Family[] = data.map(d => ({
+          id: d.id, // ID local
+          db_id: d.id, // ID Supabase
+          name: d.name,
+          parentName: d.parent_name || '',
+          phone: d.phone || '',
+          area: d.location || '',
+          address: d.address || '',
+          status: d.status as FamilyStatus,
+          childrenCount: d.children_count || 0,
+          children: d.children_data || [],
+          visits: d.visits_data || [],
+          lastVisit: d.last_visit || '-',
+          nextVisit: d.next_visit || undefined,
+          notes: d.notes || '',
+          createdAt: new Date(d.created_at).toISOString().split('T')[0],
+          priority: d.priority || false
+        }));
+        setFamilies(formattedFamilies);
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur", description: "Impossible de charger les familles.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFamilies();
+  }, [user]);
 
   const filtered = families.filter(f => {
     const matchSearch = f.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -156,38 +145,104 @@ const FamiliesModule: React.FC = () => {
     children: families.reduce((sum, f) => sum + f.childrenCount, 0),
   };
 
-  const handleCreateFamily = () => {
+  // --- 2. CRÉATION D'UNE FAMILLE ---
+  const handleCreateFamily = async () => {
     if (!newFamily.name.trim() || !newFamily.parentName.trim()) return;
-    const family: Family = {
-      id: Date.now().toString(), name: newFamily.name, parentName: newFamily.parentName,
-      phone: newFamily.phone, area: newFamily.area, address: newFamily.address,
-      status: 'pending', childrenCount: 0, children: [], visits: [],
-      lastVisit: new Date().toISOString().split('T')[0], notes: newFamily.notes,
-      createdAt: new Date().toISOString().split('T')[0], priority: false,
-    };
-    setFamilies(prev => [family, ...prev]);
-    setNewFamily({ name: '', parentName: '', phone: '', area: '', address: '', notes: '' });
-    setShowNewFamily(false);
+    setIsSubmitting(true);
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const payload = {
+        user_id: user?.id,
+        name: newFamily.name,
+        parent_name: newFamily.parentName,
+        phone: newFamily.phone,
+        location: newFamily.area,
+        address: newFamily.address,
+        notes: newFamily.notes,
+        status: 'pending',
+        children_count: 0,
+        priority: false,
+        last_visit: today,
+        children_data: [],
+        visits_data: []
+      };
+
+      const { error } = await supabase.from('families').insert([payload]);
+      if (error) throw error;
+
+      toast({ title: "Succès", description: "Famille ajoutée." });
+      setNewFamily({ name: '', parentName: '', phone: '', area: '', address: '', notes: '' });
+      setShowNewFamily(false);
+      fetchFamilies(); // Rafraîchir
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleAddVisit = () => {
-    if (!selectedFamily || !newVisit.notes.trim()) return;
-    const visit: Visit = {
-      id: Date.now().toString(), date: new Date().toISOString().split('T')[0],
-      type: newVisit.type, notes: newVisit.notes, outcome: newVisit.outcome,
-    };
-    setFamilies(prev => prev.map(f => f.id === selectedFamily.id
-      ? { ...f, visits: [visit, ...f.visits], lastVisit: visit.date }
-      : f
-    ));
-    setSelectedFamily(prev => prev ? { ...prev, visits: [visit, ...prev.visits], lastVisit: visit.date } : null);
-    setNewVisit({ type: 'Visite à domicile', notes: '', outcome: '' });
-    setShowAddVisit(false);
+  // --- 3. AJOUT D'UNE VISITE ---
+  const handleAddVisit = async () => {
+    if (!selectedFamily || !selectedFamily.db_id || !newVisit.notes.trim()) return;
+    setIsSubmitting(true);
+
+    try {
+      const visitDate = new Date().toISOString().split('T')[0];
+      const visit: Visit = {
+        id: Date.now().toString(),
+        date: visitDate,
+        type: newVisit.type,
+        notes: newVisit.notes,
+        outcome: newVisit.outcome,
+      };
+
+      const updatedVisits = [visit, ...selectedFamily.visits];
+
+      // Mise à jour DB
+      const { error } = await supabase.from('families').update({
+        visits_data: updatedVisits,
+        last_visit: visitDate
+      }).eq('id', selectedFamily.db_id);
+
+      if (error) throw error;
+
+      // Mise à jour locale
+      setFamilies(prev => prev.map(f => f.id === selectedFamily.id
+        ? { ...f, visits: updatedVisits, lastVisit: visitDate }
+        : f
+      ));
+      setSelectedFamily(prev => prev ? { ...prev, visits: updatedVisits, lastVisit: visitDate } : null);
+      
+      setNewVisit({ type: 'Visite à domicile', notes: '', outcome: '' });
+      setShowAddVisit(false);
+      toast({ title: "Visite ajoutée", description: "La note de visite a été enregistrée." });
+
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const togglePriority = (id: string) => {
-    setFamilies(prev => prev.map(f => f.id === id ? { ...f, priority: !f.priority } : f));
-    if (selectedFamily?.id === id) setSelectedFamily(prev => prev ? { ...prev, priority: !prev.priority } : null);
+  // --- 4. MODIFIER LA PRIORITÉ ---
+  const togglePriority = async (id: string) => {
+    const familyToUpdate = families.find(f => f.id === id);
+    if (!familyToUpdate || !familyToUpdate.db_id) return;
+    
+    const newPriority = !familyToUpdate.priority;
+
+    // Mise à jour locale (optimiste)
+    setFamilies(prev => prev.map(f => f.id === id ? { ...f, priority: newPriority } : f));
+    if (selectedFamily?.id === id) setSelectedFamily(prev => prev ? { ...prev, priority: newPriority } : null);
+
+    // Mise à jour DB
+    try {
+      const { error } = await supabase.from('families').update({ priority: newPriority }).eq('id', familyToUpdate.db_id);
+      if (error) throw error;
+    } catch (err: any) {
+      toast({ title: "Erreur de synchro", description: "Impossible de mettre à jour la priorité.", variant: "destructive" });
+    }
   };
 
   const l = {
@@ -247,7 +302,10 @@ const FamiliesModule: React.FC = () => {
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setShowNewFamily(false)}>{l.cancel}</Button>
-                  <Button onClick={handleCreateFamily}>{l.create}</Button>
+                  <Button onClick={handleCreateFamily} disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    {l.create}
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -297,7 +355,9 @@ const FamiliesModule: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Family list */}
           <div className="lg:col-span-1 space-y-2 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
-            {filtered.length === 0 ? (
+            {isLoading ? (
+               <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+            ) : filtered.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{l.noResults}</p></CardContent></Card>
             ) : filtered.map(family => (
               <Card
@@ -387,7 +447,7 @@ const FamiliesModule: React.FC = () => {
                     {/* Children */}
                     <TabsContent value="children" className="space-y-3 mt-4">
                       {selectedFamily.children.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-6">{l.noResults}</p>
+                        <p className="text-center text-muted-foreground py-6">Aucun enfant n'a encore été rattaché à ce dossier. Le ratachement est automatique lors des recensements.</p>
                       ) : selectedFamily.children.map(child => (
                         <Card key={child.id}>
                           <CardContent className="p-4">
@@ -419,7 +479,9 @@ const FamiliesModule: React.FC = () => {
                       <div className="flex justify-end">
                         <Button size="sm" onClick={() => setShowAddVisit(true)}><Plus className="h-4 w-4 mr-1" />{l.addVisit}</Button>
                       </div>
-                      {selectedFamily.visits.map(visit => (
+                      {selectedFamily.visits.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-6">Aucune visite enregistrée pour le moment.</p>
+                      ) : selectedFamily.visits.map(visit => (
                         <Card key={visit.id}>
                           <CardContent className="p-4">
                             <div className="flex items-center justify-between mb-2">
@@ -490,7 +552,10 @@ const FamiliesModule: React.FC = () => {
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setShowAddVisit(false)}>{l.cancel}</Button>
-                <Button onClick={handleAddVisit}>{l.save}</Button>
+                <Button onClick={handleAddVisit} disabled={isSubmitting}>
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {l.save}
+                </Button>
               </div>
             </div>
           </DialogContent>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,20 +16,26 @@ import {
   Settings, Building, Globe, Bell, Shield, Palette, Database,
   Mail, Lock, Users, Save, RefreshCw, Eye, EyeOff, CheckCircle2,
   Monitor, Smartphone, Moon, Sun, Volume2, VolumeX, Clock, Calendar,
-  FileText, Download, Upload, AlertTriangle, Info, Zap, Server
+  FileText, Download, Upload, AlertTriangle, Info, Zap, Server, Loader2
 } from 'lucide-react';
-import type { Lang } from '@/i18n/translations';
+import { supabase } from '@/lib/supabase'; 
+import { useToast } from '@/hooks/use-toast'; 
 
 const SettingsModule: React.FC = () => {
   const { lang, setLang } = useLanguage();
   const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // General settings
-  const [orgName, setOrgName] = useState('Centre de Santé Communautaire - Abobo');
-  const [orgEmail, setOrgEmail] = useState('contact@csc-abobo.ci');
-  const [orgPhone, setOrgPhone] = useState('+225 27 22 44 55 66');
-  const [orgAddress, setOrgAddress] = useState('Boulevard de la Paix, Abobo, Abidjan');
-  const [orgDescription, setOrgDescription] = useState('Centre de santé spécialisé dans le suivi du développement de l\'enfant.');
+  const [orgName, setOrgName] = useState('');
+  const [orgEmail, setOrgEmail] = useState('');
+  const [orgPhone, setOrgPhone] = useState('');
+  const [orgAddress, setOrgAddress] = useState('');
+  const [orgDescription, setOrgDescription] = useState('');
   const [timezone, setTimezone] = useState('Africa/Abidjan');
   const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
 
@@ -56,22 +62,132 @@ const SettingsModule: React.FC = () => {
   const [animationsEnabled, setAnimationsEnabled] = useState(true);
 
   // Modules
-  const [modules, setModules] = useState([
-    { id: 'screening', name: 'Dépistage', enabled: true },
-    { id: 'adhd', name: 'TDAH', enabled: true },
-    { id: 'autism', name: 'Autisme / TND', enabled: true },
-    { id: 'teleconsultation', name: 'Téléconsultation', enabled: true },
-    { id: 'carePlans', name: 'Plans de PEC', enabled: true },
-    { id: 'training', name: 'Formation', enabled: false },
-    { id: 'community', name: 'Module communautaire', enabled: false },
-    { id: 'reporting', name: 'Reporting avancé', enabled: true },
-  ]);
+  const [modules, setModules] = useState<{ id: string, name: string, enabled: boolean }[]>([]);
 
-  const [saved, setSaved] = useState(false);
+  // --- 1. LECTURE DEPUIS SUPABASE ---
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase.from('platform_settings').select('*').eq('id', 'global').single();
+        
+        if (error && error.code !== 'PGRST116') throw error; 
+        
+        if (data) {
+          setOrgName(data.org_name || '');
+          setOrgEmail(data.org_email || '');
+          setOrgPhone(data.org_phone || '');
+          setOrgAddress(data.org_address || '');
+          setOrgDescription(data.org_description || '');
+          setTimezone(data.timezone || 'Africa/Abidjan');
+          setDateFormat(data.date_format || 'DD/MM/YYYY');
+          
+          setEmailNotifs(data.email_notifs ?? true);
+          setSmsNotifs(data.sms_notifs ?? false);
+          setPushNotifs(data.push_notifs ?? true);
+          setNotifNewPatient(data.notif_new_patient ?? true);
+          setNotifAppointment(data.notif_appointment ?? true);
+          setNotifScreening(data.notif_screening ?? true);
+          setNotifReport(data.notif_report ?? false);
+          setNotifAlert(data.notif_alert ?? true);
+          
+          setTwoFactor(data.two_factor ?? false);
+          setSessionTimeout(data.session_timeout || '60');
+          setPasswordPolicy(data.password_policy || 'strong');
+          setAuditLog(data.audit_log ?? true);
+          setIpRestriction(data.ip_restriction ?? false);
+          
+          setTheme(data.theme || 'system');
+          setCompactMode(data.compact_mode ?? false);
+          setAnimationsEnabled(data.animations_enabled ?? true);
+          
+          if (data.modules && Array.isArray(data.modules) && data.modules.length > 0) {
+             setModules(data.modules);
+          } else {
+             // Fallback par défaut si vide en DB
+             setModules([
+                { id: 'screening', name: 'Dépistage', enabled: true },
+                { id: 'adhd', name: 'TDAH', enabled: true },
+                { id: 'autism', name: 'Autisme / TND', enabled: true },
+                { id: 'teleconsultation', name: 'Téléconsultation', enabled: true },
+                { id: 'carePlans', name: 'Plans de PEC', enabled: true },
+                { id: 'training', name: 'Formation', enabled: false },
+                { id: 'community', name: 'Module communautaire', enabled: false },
+                { id: 'reporting', name: 'Reporting avancé', enabled: true },
+             ]);
+          }
+        } else {
+            // Si la ligne n'existe pas du tout, on initialise avec ces modules
+            setModules([
+                { id: 'screening', name: 'Dépistage', enabled: true },
+                { id: 'adhd', name: 'TDAH', enabled: true },
+                { id: 'autism', name: 'Autisme / TND', enabled: true },
+                { id: 'teleconsultation', name: 'Téléconsultation', enabled: true },
+                { id: 'carePlans', name: 'Plans de PEC', enabled: true },
+                { id: 'training', name: 'Formation', enabled: false },
+                { id: 'community', name: 'Module communautaire', enabled: false },
+                { id: 'reporting', name: 'Reporting avancé', enabled: true },
+             ]);
+        }
+      } catch (err: any) {
+        toast({ title: "Erreur", description: "Impossible de charger les paramètres.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    fetchSettings();
+  }, [toast]);
+
+
+  // --- 2. SAUVEGARDE EN DB ---
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const payload = {
+        org_name: orgName,
+        org_email: orgEmail,
+        org_phone: orgPhone,
+        org_address: orgAddress,
+        org_description: orgDescription,
+        timezone: timezone,
+        date_format: dateFormat,
+        
+        email_notifs: emailNotifs,
+        sms_notifs: smsNotifs,
+        push_notifs: pushNotifs,
+        notif_new_patient: notifNewPatient,
+        notif_appointment: notifAppointment,
+        notif_screening: notifScreening,
+        notif_report: notifReport,
+        notif_alert: notifAlert,
+        
+        two_factor: twoFactor,
+        session_timeout: sessionTimeout,
+        password_policy: passwordPolicy,
+        audit_log: auditLog,
+        ip_restriction: ipRestriction,
+        
+        theme: theme,
+        compact_mode: compactMode,
+        animations_enabled: animationsEnabled,
+        
+        modules: modules,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase.from('platform_settings').upsert({ id: 'global', ...payload });
+
+      if (error) throw error;
+
+      setSaved(true);
+      toast({ title: "Succès", description: "Vos paramètres ont été enregistrés." });
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err: any) {
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleModule = (id: string) => {
@@ -113,7 +229,7 @@ const SettingsModule: React.FC = () => {
       regional: 'Configurações regionais', language: 'Idioma', timezone: 'Fuso horário', dateFormat: 'Formato de data',
       notifChannels: 'Canais de notificação', emailNotifs: 'Notificações por email', smsNotifs: 'Notificações SMS', pushNotifs: 'Notificações push',
       notifTypes: 'Tipos de notificações', newPatient: 'Novo paciente registrado', appointment: 'Lembretes de consultas', screening: 'Resultados de triagem', report: 'Relatórios gerados', alert: 'Alertas clínicos',
-      securitySettings: 'Configurações de segurança', twoFactor: 'Autenticação de dois fatores', sessionTimeout: 'Expiração da sessão (min)', passwordPolicy: 'Política de senha', auditLog: 'Registro de auditoria', ipRestriction: 'Restrição de IP',
+      securitySettings: 'Configurações de segurança', twoFactor: 'Autenticação de dois fatores', sessionTimeout: 'Expiração da sessão (min)', passwordPolicy: 'Politique de senha', auditLog: 'Registro de auditoria', ipRestriction: 'Restrição de IP',
       weak: 'Fraca', medium: 'Média', strong: 'Forte',
       themeSettings: 'Tema e exibição', lightTheme: 'Claro', darkTheme: 'Escuro', systemTheme: 'Sistema', compactMode: 'Modo compacto', animations: 'Animações',
       activeModules: 'Módulos ativos', moduleDesc: 'Ative ou desative os módulos conforme necessário.',
@@ -147,12 +263,22 @@ const SettingsModule: React.FC = () => {
     save: 'Enregistrer', saved: 'Enregistré !', reset: 'Réinitialiser',
   };
 
-  const langOptions: { value: Lang; label: string }[] = [
+  const langOptions: { value: string; label: string }[] = [
     { value: 'fr', label: 'Français' },
     { value: 'en', label: 'English' },
     { value: 'pt', label: 'Português' },
     { value: 'ar', label: 'العربية' },
   ];
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -165,7 +291,8 @@ const SettingsModule: React.FC = () => {
               {user?.role === 'superAdmin' ? 'Global' : user?.role === 'program' ? 'Programme' : 'Organisation'}
             </p>
           </div>
-          <Button onClick={handleSave} disabled={saved}>
+          <Button onClick={handleSave} disabled={saved || isSaving}>
+            {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
             {saved ? <><CheckCircle2 className="h-4 w-4 mr-2" />{l.saved}</> : <><Save className="h-4 w-4 mr-2" />{l.save}</>}
           </Button>
         </div>
@@ -205,7 +332,7 @@ const SettingsModule: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <Label>{l.language}</Label>
-                    <Select value={lang} onValueChange={v => setLang(v as Lang)}>
+                    <Select value={lang} onValueChange={v => setLang(v)}>
                       <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {langOptions.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
@@ -402,7 +529,7 @@ const SettingsModule: React.FC = () => {
                   <CardDescription>{l.moduleDesc}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {modules.map(m => (
+                  {modules.map((m) => (
                     <div key={m.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                       <div className="flex items-center gap-3">
                         <div className={`w-2 h-2 rounded-full ${m.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`} />

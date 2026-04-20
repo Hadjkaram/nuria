@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 
-export type UserRole = 'parent' | 'professional' | 'teacher' | 'community' | 'orgAdmin' | 'program' | 'ministry' | 'superAdmin';
+// MODIFICATION : Ajout du rôle 'supervisor' à la fin de la liste
+export type UserRole = 'parent' | 'professional' | 'teacher' | 'community' | 'orgAdmin' | 'program' | 'ministry' | 'superAdmin' | 'supervisor';
 
 export interface User {
   id: string;
