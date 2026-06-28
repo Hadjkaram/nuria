@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Eye, EyeOff, LogIn } from 'lucide-react';
 import nuriaLogo from '@/assets/nuria-logo.png';
-// Import pour accéder directement à la db si besoin après le login
 import { supabase } from '@/lib/supabase';
 
 const LoginPage: React.FC = () => {
@@ -24,32 +23,70 @@ const LoginPage: React.FC = () => {
     setLoading(true);
 
     try {
-      // 1. Tente de connecter l'utilisateur via le context Auth
+      // 1. Tente de connecter l'utilisateur
       const success = await login(email, password);
 
       if (success) {
-        // 2. Si la connexion réussit, on va chercher son rôle dans la table profiles
-        const { data: { user } } = await supabase.auth.getUser();
+        // 2. On récupère la session
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
         
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single();
-
-          // 3. Redirection intelligente basée sur le rôle
-          if (profile?.role === 'parent') {
-            navigate('/parent-dashboard');
-          } else if (profile?.role === 'agent') {
-            navigate('/dashboard'); // Ou '/agent-dashboard' si tu as séparé les routes
-          } else {
-             // Redirection par défaut (Médecins, Superviseurs, etc.)
-            navigate('/dashboard');
-          }
-        } else {
-            navigate('/dashboard'); // Sécurité
+        if (authError || !user) {
+          setError("Session introuvable après connexion.");
+          setLoading(false);
+          return;
         }
+
+        // 3. On va chercher son rôle ET SON STATUT dans la table profiles
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role, status')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) {
+          console.error("Erreur Profil:", profileError);
+          setError("Accès refusé : Impossible de lire votre profil (Erreur RLS ou profil inexistant).");
+          setLoading(false);
+          return;
+        }
+
+        // 🚨 BLOCAGE DU COMPTE EN ATTENTE OU SUSPENDU
+        if (profile?.status === 'pending') {
+          await supabase.auth.signOut();
+          setError("Accès refusé : Votre compte est en attente de validation par un administrateur.");
+          setLoading(false);
+          return;
+        }
+
+        if (profile?.status === 'suspended') {
+          await supabase.auth.signOut();
+          setError("Accès refusé : Votre compte a été suspendu.");
+          setLoading(false);
+          return;
+        }
+
+        // 4. AIGUILLAGE INTELLIGENT (Le portail unique)
+        const userRole = profile?.role;
+        const userEmail = user.email;
+
+        if (userRole === 'parent') {
+          // Les parents vont sur leur espace dédié
+          navigate('/parent-dashboard');
+          
+        } else if (
+          userRole === 'community' || 
+          userRole === 'agent' || 
+          userRole === 'supervisor' || 
+          userEmail === 'superviseur1@enuria.net'
+        ) {
+          // Les agents terrain et superviseurs vont sur l'application de recensement
+          navigate('/recensement'); 
+          
+        } else {
+          // Tous les autres (Administrateurs, Programme, Ministère, Médecins, etc.) vont sur le Dashboard global
+          navigate('/dashboard');
+        }
+        
       } else {
         setError('Email ou mot de passe incorrect');
       }
@@ -65,7 +102,6 @@ const LoginPage: React.FC = () => {
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Left Panel - Branding */}
       <div className="lg:w-[55%] w-full bg-gradient-to-br from-[hsl(205,78%,22%)] to-[hsl(205,70%,32%)] flex flex-col items-center justify-center px-8 py-16 lg:py-0 text-center relative overflow-hidden">
-        {/* Subtle decorative circles */}
         <div className="absolute top-[-80px] left-[-80px] w-64 h-64 rounded-full bg-white/5" />
         <div className="absolute bottom-[-60px] right-[-60px] w-48 h-48 rounded-full bg-white/5" />
 
@@ -87,7 +123,9 @@ const LoginPage: React.FC = () => {
           <p className="text-muted-foreground mb-8">Accédez à votre espace sécurisé</p>
 
           {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-4">{error}</div>
+            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-4 font-medium border border-destructive/20 shadow-sm">
+              {error}
+            </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">

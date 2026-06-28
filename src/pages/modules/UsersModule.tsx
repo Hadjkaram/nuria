@@ -25,15 +25,15 @@ interface ManagedUser {
   lastName: string;
   email: string;
   phone: string;
-  role: UserRole;
-  status: UserStatus;
+  role: UserRole | string; // Permettre des rôles inconnus sans crasher
+  status: UserStatus | string;
   organization: string;
   lastLogin: string;
   createdAt: string;
   isOnline: boolean;
 }
 
-const roleLabels: Record<UserRole, Record<string, string>> = {
+const roleLabels: Record<string, Record<string, string>> = {
   parent: { fr: 'Parent', en: 'Parent', pt: 'Pai/Mãe', ar: 'ولي أمر' },
   professional: { fr: 'Professionnel', en: 'Professional', pt: 'Profissional', ar: 'مهني' },
   teacher: { fr: 'Enseignant', en: 'Teacher', pt: 'Professor', ar: 'معلم' },
@@ -42,9 +42,10 @@ const roleLabels: Record<UserRole, Record<string, string>> = {
   program: { fr: 'Programme national', en: 'National program', pt: 'Programa nacional', ar: 'البرنامج الوطني' },
   ministry: { fr: 'Ministère', en: 'Ministry', pt: 'Ministério', ar: 'الوزارة' },
   superAdmin: { fr: 'Super Admin', en: 'Super Admin', pt: 'Super Admin', ar: 'المدير العام' },
+  supervisor: { fr: 'Superviseur', en: 'Supervisor', pt: 'Supervisor', ar: 'مشرف' }, // Ajout du rôle supervisor !
 };
 
-const roleColors: Record<UserRole, string> = {
+const roleColors: Record<string, string> = {
   parent: 'bg-blue-100 text-blue-800',
   professional: 'bg-emerald-100 text-emerald-800',
   teacher: 'bg-amber-100 text-amber-800',
@@ -53,6 +54,7 @@ const roleColors: Record<UserRole, string> = {
   program: 'bg-teal-100 text-teal-800',
   ministry: 'bg-indigo-100 text-indigo-800',
   superAdmin: 'bg-rose-100 text-rose-800',
+  supervisor: 'bg-cyan-100 text-cyan-800',
 };
 
 const statusConfig: Record<string, { label: Record<string, string>; style: string; icon: React.ElementType }> = {
@@ -60,6 +62,22 @@ const statusConfig: Record<string, { label: Record<string, string>; style: strin
   inactive: { label: { fr: 'Inactif', en: 'Inactive', pt: 'Inativo', ar: 'غير نشط' }, style: 'bg-muted text-muted-foreground', icon: UserX },
   pending: { label: { fr: 'En attente', en: 'Pending', pt: 'Pendente', ar: 'معلق' }, style: 'bg-amber-100 text-amber-800', icon: Clock },
   suspended: { label: { fr: 'Suspendu', en: 'Suspended', pt: 'Suspenso', ar: 'معلق' }, style: 'bg-red-100 text-red-800', icon: AlertCircle },
+};
+
+// Fonction sécurisée pour obtenir le label d'un rôle
+const getRoleLabel = (role: string, lang: string) => {
+  if (roleLabels[role] && roleLabels[role][lang]) {
+    return roleLabels[role][lang];
+  }
+  return role || 'Inconnu';
+};
+
+// Fonction sécurisée pour obtenir le label d'un statut
+const getStatusLabel = (status: string, lang: string) => {
+  if (statusConfig[status] && statusConfig[status].label[lang]) {
+    return statusConfig[status].label[lang];
+  }
+  return status || 'Inconnu';
 };
 
 const UsersModule: React.FC = () => {
@@ -82,34 +100,58 @@ const UsersModule: React.FC = () => {
     email: '', firstName: '', lastName: '', role: '', organization: ''
   });
 
-  // --- 1. LECTURE DEPUIS SUPABASE ---
+  // --- 1. LECTURE DEPUIS SUPABASE (BLINDÉE) ---
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      if (!currentUser) return;
 
-      if (error) throw error;
+      // 1. Vérifier la structure de l'admin connecté
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('assigned_structure')
+        .eq('id', currentUser.id)
+        .single();
+        
+      const myStructure = profileData?.assigned_structure || null;
+
+      // Est-ce un SuperAdmin qui voit tout ?
+      const isGeneral = 
+        ['program', 'orgAdmin', 'superAdmin'].includes(currentUser?.role || '') || 
+        (currentUser?.role === 'supervisor' && (!myStructure || myStructure.trim() === '' || /coordination|général|national|toutes/i.test(myStructure))) ||
+        currentUser?.email === 'superviseur1@enuria.net';
+
+      // 2. Récupérer les utilisateurs (Filtrés ou non)
+      let query = supabase.from('profiles').select('*').order('created_at', { ascending: false });
+
+      if (!isGeneral && myStructure) {
+        query = query.eq('assigned_structure', myStructure);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+         console.warn("Erreur chargement profiles:", error);
+         toast({ title: "Erreur partielle", description: "Impossible de charger tous les utilisateurs.", variant: "destructive" });
+      }
 
       if (data) {
         setUsers(data.map(u => ({
-          id: u.id,
-          firstName: u.first_name,
-          lastName: u.last_name,
-          email: u.email,
-          phone: u.phone || '',
-          role: u.role as UserRole,
-          status: u.status as UserStatus,
-          organization: u.organization || '-',
+          id: u.id || 'N/A',
+          firstName: u.first_name || 'Inconnu',
+          lastName: u.last_name || '',
+          email: u.email || 'Email non fourni',
+          phone: u.phone || '-',
+          role: u.role || 'inconnu',
+          status: u.status || 'inactive',
+          organization: u.assigned_structure || u.organization || '-', // Utilise assigned_structure en priorité
           lastLogin: u.last_login ? new Date(u.last_login).toLocaleDateString(lang) : '-',
-          createdAt: new Date(u.created_at).toLocaleDateString(lang),
+          createdAt: u.created_at ? new Date(u.created_at).toLocaleDateString(lang) : '-',
           isOnline: u.is_online || false
         })));
       }
     } catch (err: any) {
-      toast({ title: "Erreur", description: "Impossible de charger les utilisateurs.", variant: "destructive" });
+      console.error("Crash évité dans fetchUsers:", err);
+      toast({ title: "Erreur", description: "Problème inattendu lors du chargement.", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -117,7 +159,7 @@ const UsersModule: React.FC = () => {
 
   useEffect(() => {
     fetchUsers();
-  }, [lang]);
+  }, [lang, currentUser]);
 
   // --- 2. ACTIONS DE STATUT ---
   const updateUserStatus = async (id: string, status: UserStatus) => {
@@ -162,7 +204,6 @@ const UsersModule: React.FC = () => {
 
     setIsInviting(true);
     try {
-      // Simule la création d'un profil "en attente" dans la base
       const fakeId = crypto.randomUUID(); 
       const { error } = await supabase.from('profiles').insert([{
         id: fakeId,
@@ -170,7 +211,7 @@ const UsersModule: React.FC = () => {
         first_name: inviteForm.firstName,
         last_name: inviteForm.lastName,
         role: inviteForm.role,
-        organization: inviteForm.organization || '-',
+        assigned_structure: inviteForm.organization || '-', // Correction du champ BDD
         status: 'pending'
       }]);
 
@@ -252,8 +293,8 @@ const UsersModule: React.FC = () => {
             <SelectTrigger className="w-full sm:w-48"><Shield className="h-4 w-4 mr-2" /><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{l.allRoles}</SelectItem>
-              {(Object.keys(roleLabels) as UserRole[]).map(r => (
-                <SelectItem key={r} value={r}>{roleLabels[r][lang]}</SelectItem>
+              {Object.keys(roleLabels).map(r => (
+                <SelectItem key={r} value={r}>{roleLabels[r][lang] || r}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -262,7 +303,7 @@ const UsersModule: React.FC = () => {
             <SelectContent>
               <SelectItem value="all">{l.all}</SelectItem>
               {Object.entries(statusConfig).map(([key, cfg]) => (
-                <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+                <SelectItem key={key} value={key}>{cfg.label[lang] || key}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -285,7 +326,7 @@ const UsersModule: React.FC = () => {
                   <CardContent className="p-4 flex items-center gap-4">
                     <div className="relative flex-shrink-0">
                       <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-sm font-bold text-foreground uppercase">
-                        {u.firstName[0]}{u.lastName[0]}
+                        {u.firstName[0] || ''}{u.lastName[0] || ''}
                       </div>
                       {u.isOnline && <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-card" />}
                     </div>
@@ -294,8 +335,12 @@ const UsersModule: React.FC = () => {
                       <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <Badge className={`text-[10px] ${roleColors[u.role]}`}>{roleLabels[u.role][lang]}</Badge>
-                      <Badge className={`text-[10px] ${statusConfig[u.status]?.style || ''}`}>{statusConfig[u.status]?.label[lang]}</Badge>
+                      <Badge className={`text-[10px] ${roleColors[u.role] || 'bg-slate-100 text-slate-800'}`}>
+                        {getRoleLabel(u.role, lang)}
+                      </Badge>
+                      <Badge className={`text-[10px] ${statusConfig[u.status]?.style || 'bg-slate-100 text-slate-800'}`}>
+                        {getStatusLabel(u.status, lang)}
+                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
@@ -309,7 +354,7 @@ const UsersModule: React.FC = () => {
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-3">
                       <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center text-lg font-bold text-foreground uppercase">
-                        {selectedUser.firstName[0]}{selectedUser.lastName[0]}
+                        {selectedUser.firstName[0] || ''}{selectedUser.lastName[0] || ''}
                       </div>
                       <div>
                         <CardTitle className="text-lg">{selectedUser.firstName} {selectedUser.lastName}</CardTitle>
@@ -319,8 +364,12 @@ const UsersModule: React.FC = () => {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex gap-2 flex-wrap">
-                      <Badge className={roleColors[selectedUser.role]}>{roleLabels[selectedUser.role][lang]}</Badge>
-                      <Badge className={statusConfig[selectedUser.status]?.style}>{statusConfig[selectedUser.status]?.label[lang]}</Badge>
+                      <Badge className={roleColors[selectedUser.role] || 'bg-slate-100'}>
+                        {getRoleLabel(selectedUser.role, lang)}
+                      </Badge>
+                      <Badge className={statusConfig[selectedUser.status]?.style || 'bg-slate-100'}>
+                        {getStatusLabel(selectedUser.status, lang)}
+                      </Badge>
                     </div>
 
                     <div className="space-y-3 text-sm">
@@ -404,8 +453,8 @@ const UsersModule: React.FC = () => {
                     <SelectValue placeholder="Sélectionner un rôle" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(roleLabels) as UserRole[]).map(r => (
-                      <SelectItem key={r} value={r}>{roleLabels[r][lang]}</SelectItem>
+                    {Object.keys(roleLabels).map(r => (
+                      <SelectItem key={r} value={r}>{roleLabels[r][lang] || r}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

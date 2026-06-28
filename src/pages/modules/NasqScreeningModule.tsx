@@ -196,7 +196,7 @@ interface ScreeningHistory {
   risk_level: string;
   score: number;
   created_at: string;
-  responses?: Record<string, boolean>;
+  responses?: Record<string, boolean | string>; // Autorise les string pour stocker 'NA'
   agent_id?: string;
   form_type?: string; 
 }
@@ -220,7 +220,6 @@ const NasqScreeningModule: React.FC = () => {
   const [parentName, setParentName] = useState('');
   const [parentContact, setParentContact] = useState('');
 
-  // MODIFICATION 1/3 : État pour stocker la structure assignée à l'agent
   const [agentAssignedStructure, setAgentAssignedStructure] = useState<string | null>(null);
   
   // Nouveaux champs facultatifs
@@ -230,14 +229,15 @@ const NasqScreeningModule: React.FC = () => {
 
   // États du formulaire
   const [stage, setStage] = useState<1 | 2>(1); // 1 = Dépistage Âge, 2 = M-CHAT
-  const [answersStage1, setAnswersStage1] = useState<Record<string, boolean>>({});
+  const [answersStage1, setAnswersStage1] = useState<Record<string, boolean | string>>({}); // Modifié pour accepter 'NA'
   const [answersStage2, setAnswersStage2] = useState<Record<string, boolean>>({});
   const [agentComment, setAgentComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submittedResult, setSubmittedResult] = useState<{score: number, risk: any, maxScore: number} | null>(null);
+  const [submittedResult, setSubmittedResult] = useState<{score: number, risk: any, maxScore: number, screeningId?: string} | null>(null);
   
-  // Pop-up Sensibilisation
-  const [showSensibilisationPopup, setShowSensibilisationPopup] = useState(false);
+  // Pop-up Orientation (Referral)
+  const [showReferralPopup, setShowReferralPopup] = useState(false);
+  const [isReferralSubmitting, setIsReferralSubmitting] = useState(false);
 
   // États pour l'historique et les onglets
   const [myScreenings, setMyScreenings] = useState<ScreeningHistory[]>([]);
@@ -268,12 +268,9 @@ const NasqScreeningModule: React.FC = () => {
 
   const currentBracket = useMemo(() => {
     if (ageInMonths === null) return null;
-    
-    // Cherche la tranche qui correspond exactement
     const exactBracket = AGE_BRACKETS.find(b => ageInMonths >= b.min && ageInMonths <= b.max);
     if (exactBracket) return exactBracket;
 
-    // NOUVEAUTÉ : Si l'enfant a plus de 60 mois (dépassant la dernière tranche), on lui assigne la toute dernière tranche disponible
     if (ageInMonths > 60) {
       return AGE_BRACKETS[AGE_BRACKETS.length - 1]; // "48 à 59 mois"
     }
@@ -298,7 +295,6 @@ const NasqScreeningModule: React.FC = () => {
     if (!user) return;
     setIsLoadingHistory(true);
     try {
-      // MODIFICATION 2/3 : On récupère la structure de l'agent en silence
       const { data: profileData } = await supabase
         .from('profiles')
         .select('assigned_structure')
@@ -338,58 +334,20 @@ const NasqScreeningModule: React.FC = () => {
     fetchMyData();
   }, [user]);
 
-  // --- VÉRIFICATION DES DOUBLONS ---
-  useEffect(() => {
-    const checkDuplicate = async () => {
-      if (childName.length > 2 && dob && parentName.length > 2) {
-        try {
-          const { data, error } = await supabase
-            .from('screenings')
-            .select('*')
-            .ilike('child_name', childName.trim())
-            .eq('dob', dob)
-            .ilike('parent_name', parentName.trim())
-            .limit(1);
-
-          if (error) throw error;
-
-          if (data && data.length > 0) {
-            const existingPatient = data[0];
-            if (existingPatient.agent_id === user?.id) {
-              toast({ title: "Patient existant", description: "Ce patient a déjà été recensé par vous. Redirection vers l'historique." });
-              resetForm();
-              setSelectedHistoryItem(existingPatient);
-            } else {
-              toast({ title: "Accès Refusé", description: "Ce patient est déjà recensé par un autre agent dans le système national.", variant: "destructive" });
-              resetForm();
-            }
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    };
-    const timeoutId = setTimeout(() => { checkDuplicate(); }, 1000);
-    return () => clearTimeout(timeoutId);
-  }, [childName, dob, parentName, user?.id, toast]);
-
-
-  const handleAnswer1 = (qId: string, value: boolean) => { setAnswersStage1(prev => ({ ...prev, [qId]: value })); };
+  const handleAnswer1 = (qId: string, value: boolean | string) => { setAnswersStage1(prev => ({ ...prev, [qId]: value })); };
   const handleAnswer2 = (qId: string, value: boolean) => { setAnswersStage2(prev => ({ ...prev, [qId]: value })); };
 
   const answeredCount1 = Object.keys(answersStage1).length;
   const answeredCount2 = Object.keys(answersStage2).length;
 
-  // Calcul du risque pour le Stage 1 (Au moins un NON = Risque)
+  // Seules les vraies réponses "false" sont comptées comme un risque. La chaîne 'NA' est ignorée.
   const hasRiskInStage1 = currentQuestions1.some(q => answersStage1[q.id] === false);
 
-  // Calcul du score M-CHAT (Stage 2)
   const calculateMchatScore = () => {
     let score = 0;
     M_CHAT_R_QUESTIONS.forEach((q, index) => {
       const answer = answersStage2[q.id];
       if (answer === undefined) return;
-      // Questions inversées (2, 5, 12) : Oui = Risque
       if ((index + 1) === 2 || (index + 1) === 5 || (index + 1) === 12) {
         if (answer === true) score += 1;
       } else {
@@ -399,23 +357,17 @@ const NasqScreeningModule: React.FC = () => {
     return score;
   };
 
-  const getRiskLevel = (score: number, isMchat: boolean) => {
+  // Nouvelle logique de risque qui tient compte du stage 1 si on n'a pas fait le MCHAT
+  const getRiskLevel = (score: number, isMchat: boolean, stage1Risk: boolean) => {
     if (!isMchat) {
+      if (stage1Risk) {
+        return { label: "Risque suspecté (PNSM)", color: "text-amber-600", bg: "bg-amber-50", borderTop: "border-t-amber-500", icon: <AlertTriangle className="h-12 w-12 text-amber-600" /> };
+      }
       return { label: "Développement Normal", color: "text-emerald-600", bg: "bg-emerald-50", borderTop: "border-t-emerald-500", icon: <ShieldCheck className="h-12 w-12 text-emerald-600" /> };
     } else {
       if (score <= 2) return { label: "Risque Faible", color: "text-emerald-600", bg: "bg-emerald-50", borderTop: "border-t-emerald-500", icon: <ShieldCheck className="h-12 w-12 text-emerald-600" /> };
       if (score <= 7) return { label: "Risque Moyen", color: "text-amber-600", bg: "bg-amber-50", borderTop: "border-t-amber-500", icon: <AlertTriangle className="h-12 w-12 text-amber-600" /> };
       return { label: "Risque Élevé", color: "text-red-600", bg: "bg-red-50", borderTop: "border-t-red-500", icon: <AlertTriangle className="h-12 w-12 text-red-600" /> };
-    }
-  };
-
-  const proceedToNextStage = () => {
-    if (hasRiskInStage1) {
-      setStage(2);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      toast({ title: "Risque détecté", description: "Le système requiert l'administration du questionnaire M-CHAT-R.", variant: "destructive" });
-    } else {
-      submitData(false); // Soumission directe (Normal)
     }
   };
 
@@ -426,12 +378,11 @@ const NasqScreeningModule: React.FC = () => {
     }
     setIsSubmitting(true);
     
-    // Si MCHAT a été fait, le score final est celui du MCHAT. Sinon, c'est le nombre de "Non" du stage 1 (qui est 0 ici).
-    const finalScore = fromMchat ? calculateMchatScore() : 0;
-    const riskStatus = getRiskLevel(finalScore, fromMchat);
+    const stage1Score = currentQuestions1.filter(q => answersStage1[q.id] === false).length;
+    const finalScore = fromMchat ? calculateMchatScore() : stage1Score;
+    const riskStatus = getRiskLevel(finalScore, fromMchat, hasRiskInStage1);
     const finalFormType = fromMchat ? `${currentFormName} + M-CHAT-R` : currentFormName;
 
-    // Concaténer toutes les réponses et métadonnées
     const finalResponses = {
       ...answersStage1,
       ...answersStage2,
@@ -442,7 +393,7 @@ const NasqScreeningModule: React.FC = () => {
     };
 
     try {
-      const { error } = await supabase.from('screenings').insert([{
+      const { data, error } = await supabase.from('screenings').insert([{
         agent_id: user?.id,
         child_name: childName,
         dob: dob,
@@ -454,18 +405,24 @@ const NasqScreeningModule: React.FC = () => {
         score: finalScore,
         risk_level: riskStatus.label,
         form_type: finalFormType,
-        structure: agentAssignedStructure || 'Non assignée', // MODIFICATION 3/3 : On injecte la structure ici
+        structure: agentAssignedStructure || 'Non assignée', 
         created_at: new Date().toISOString()
-      }]);
+      }]).select('id').single();
 
       if (error) throw error;
       toast({ title: "Succès", description: "Recensement enregistré !" });
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      setSubmittedResult({ score: finalScore, risk: riskStatus, maxScore: fromMchat ? M_CHAT_R_QUESTIONS.length : currentQuestions1.length });
       
-      // Si MCHAT a été déclenché, on affiche le Pop-up de sensibilisation
-      if (fromMchat) {
-        setShowSensibilisationPopup(true);
+      setSubmittedResult({ 
+        score: finalScore, 
+        risk: riskStatus, 
+        maxScore: fromMchat ? M_CHAT_R_QUESTIONS.length : currentQuestions1.length,
+        screeningId: data?.id
+      });
+      
+      // Si risque détecté, on ouvre le popup de demande d'orientation
+      if (fromMchat || hasRiskInStage1) {
+        setShowReferralPopup(true);
       }
 
       fetchMyData(); 
@@ -476,7 +433,41 @@ const NasqScreeningModule: React.FC = () => {
     }
   };
 
-  // --- GÉNÉRATION DU PDF ---
+  // --- NOUVELLE FONCTION : ENREGISTRER L'ORIENTATION ---
+  const handleReferral = async (didRefer: boolean) => {
+    setIsReferralSubmitting(true);
+    try {
+      const referralData = {
+        screening_id: submittedResult?.screeningId,
+        child_name: childName,
+        referred_by_agent: user?.id,
+        structure_origin: agentAssignedStructure || 'Non assignée',
+        status: didRefer ? 'active' : 'declined', // active = orienté avec succès, declined = refus des parents ou non orienté
+        notes: didRefer ? "Orienté vers une structure de santé suite à un dépistage à risque." : "Non orienté / Refus des parents au moment du dépistage."
+      };
+
+      // Tente d'insérer dans la table referrals (si elle existe, on gère silencieusement si elle n'existe pas encore)
+      const { error } = await supabase.from('referrals').insert([referralData]);
+      
+      if (error && error.code !== '42P01') {
+         throw error;
+      }
+
+      if (didRefer) {
+        toast({ title: "Orientation enregistrée", description: "L'orientation a été tracée dans la base de données." });
+      } else {
+        toast({ title: "Information enregistrée", description: "La non-orientation a été notée.", variant: "default" });
+      }
+
+    } catch (err: any) {
+      console.error("Erreur referral:", err);
+      // On ne bloque pas l'utilisateur si la table n'existe pas
+    } finally {
+      setIsReferralSubmitting(false);
+      setShowReferralPopup(false);
+    }
+  };
+
   const downloadReportPDF = () => {
     const currentMonth = new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
     const printContent = `
@@ -868,17 +859,27 @@ const NasqScreeningModule: React.FC = () => {
                             {q.text}
                           </p>
                         </div>
-                        <div className="flex gap-3 shrink-0 md:w-64">
+                        {/* CONTENEUR BOUTONS DYNAMIQUE */}
+                        <div className={`flex gap-2 shrink-0 ${q.id === 'q107' ? 'w-full md:w-auto flex-wrap' : 'md:w-64'}`}>
                           <Button 
-                            className={`flex-1 h-14 rounded-xl font-bold text-lg transition-all ${
+                            className={`flex-1 h-14 rounded-xl font-bold text-sm md:text-lg transition-all ${
                               answersStage1[q.id] === true ? "bg-[#0056A8] text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                             }`} 
                             variant="ghost" onClick={() => handleAnswer1(q.id, true)}>Oui</Button>
                           <Button 
-                            className={`flex-1 h-14 rounded-xl font-bold text-lg transition-all ${
+                            className={`flex-1 h-14 rounded-xl font-bold text-sm md:text-lg transition-all ${
                               answersStage1[q.id] === false ? "bg-red-500 text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                             }`} 
                             variant="ghost" onClick={() => handleAnswer1(q.id, false)}>Non</Button>
+                            
+                          {/* BOUTON SPÉCIAL "NON SCOLARISÉ" POUR Q107 UNIQUEMENT */}
+                          {q.id === 'q107' && (
+                            <Button 
+                              className={`flex-1 h-14 rounded-xl font-bold text-sm md:text-base transition-all ${
+                                answersStage1[q.id] === 'NA' ? "bg-slate-500 text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`} 
+                              variant="ghost" onClick={() => handleAnswer1(q.id, 'NA')}>Non scolarisé</Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -910,16 +911,39 @@ const NasqScreeningModule: React.FC = () => {
                           <div className="w-full bg-slate-100 h-3 rounded-full mb-6 overflow-hidden">
                             <div className="h-full transition-all duration-500 ease-out rounded-full bg-gradient-to-r from-[#00A3E0] to-[#0056A8]" style={{ width: `${(answeredCount1 / currentQuestions1.length) * 100}%` }} />
                           </div>
-                          <Button 
-                            className={`w-full h-16 text-lg rounded-xl font-black transition-all ${
-                              answeredCount1 === currentQuestions1.length ? (hasRiskInStage1 ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xl hover:-translate-y-1' : 'bg-[#0056A8] hover:bg-[#004080] text-white shadow-xl hover:-translate-y-1') : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                            }`} 
-                            disabled={isSubmitting || answeredCount1 < currentQuestions1.length} 
-                            onClick={proceedToNextStage}
-                          >
-                            {isSubmitting ? <Loader2 className="animate-spin mr-3 h-6 w-6" /> : (hasRiskInStage1 ? <ArrowRight className="mr-3 h-6 w-6" /> : <CheckCircle2 className="mr-3 h-6 w-6" />)}
-                            {answeredCount1 < currentQuestions1.length ? `Répondez aux questions restantes` : (hasRiskInStage1 ? `Suivant (Approfondissement M-CHAT-R requis)` : `Enregistrer le dépistage`)}
-                          </Button>
+                          
+                          {/* LOGIQUE DES BOUTONS */}
+                          {answeredCount1 < currentQuestions1.length ? (
+                            <Button 
+                              className="w-full h-16 text-lg rounded-xl font-black transition-all bg-slate-200 text-slate-400 cursor-not-allowed" 
+                              disabled
+                            >
+                              Répondez aux questions restantes
+                            </Button>
+                          ) : (
+                            <div className="flex flex-col sm:flex-row gap-4">
+                              <Button 
+                                className="flex-1 h-16 text-lg rounded-xl font-black transition-all bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl hover:-translate-y-1"
+                                disabled={isSubmitting}
+                                onClick={() => submitData(false)}
+                              >
+                                {isSubmitting ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : <CheckCircle2 className="mr-2 h-5 w-5" />}
+                                Enregistrer l'évaluation
+                              </Button>
+                              
+                              <Button 
+                                className="flex-1 h-16 text-lg rounded-xl font-black transition-all bg-[#0056A8] hover:bg-[#004080] text-white shadow-xl hover:-translate-y-1"
+                                disabled={isSubmitting}
+                                onClick={() => {
+                                  setStage(2);
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                }}
+                              >
+                                Aller au M-CHAT-R <ArrowRight className="ml-2 h-5 w-5" />
+                              </Button>
+                            </div>
+                          )}
+
                         </CardContent>
                       </Card>
                     </div>
@@ -927,32 +951,32 @@ const NasqScreeningModule: React.FC = () => {
                 </>
               )}
 
-              {/* ÉTAPE 2 : QUESTIONNAIRE M-CHAT-R (Affiché uniquement si risque détecté en Stage 1) */}
+              {/* ÉTAPE 2 : QUESTIONNAIRE M-CHAT-R */}
               {stage === 2 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-500">
-                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex items-start gap-4">
-                    <AlertTriangle className="h-8 w-8 text-amber-500 shrink-0" />
+                  <div className="bg-[#0056A8]/5 border border-[#0056A8]/20 rounded-2xl p-6 flex items-start gap-4">
+                    <Activity className="h-8 w-8 text-[#0056A8] shrink-0" />
                     <div>
-                      <h3 className="font-bold text-amber-800 text-lg">Approfondissement Requis</h3>
-                      <p className="text-amber-700 text-sm mt-1">L'évaluation précédente indique un risque. Veuillez poursuivre avec le questionnaire spécifique M-CHAT-R pour affiner le diagnostic.</p>
+                      <h3 className="font-bold text-[#0056A8] text-lg">Approfondissement</h3>
+                      <p className="text-slate-600 text-sm mt-1">Vous avez choisi de poursuivre avec le questionnaire spécifique M-CHAT-R pour affiner l'évaluation du développement de cet enfant.</p>
                     </div>
                   </div>
 
                   {M_CHAT_R_QUESTIONS.map((q, index) => (
                     <Card key={q.id} className={`border-none shadow-sm rounded-2xl transition-all duration-300 overflow-hidden ${
-                      answersStage2[q.id] !== undefined ? 'ring-2 ring-amber-400/50 bg-amber-50/30' : 'hover:shadow-md bg-white border border-slate-100'
+                      answersStage2[q.id] !== undefined ? 'ring-2 ring-[#00A3E0]/30 bg-blue-50/30' : 'hover:shadow-md bg-white border border-slate-100'
                     }`}>
                       <CardContent className="p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-6">
                         <div className="flex-1">
                           <p className="text-base md:text-lg font-semibold leading-snug text-slate-700">
-                            <span className="text-amber-600 mr-3 font-black text-xl bg-amber-100 w-10 h-10 inline-flex items-center justify-center rounded-xl">{index + 1}</span>
+                            <span className="text-[#0056A8] mr-3 font-black text-xl bg-blue-50 w-10 h-10 inline-flex items-center justify-center rounded-xl">{index + 1}</span>
                             {q.text}
                           </p>
                         </div>
                         <div className="flex gap-3 shrink-0 md:w-64">
                           <Button 
                             className={`flex-1 h-14 rounded-xl font-bold text-lg transition-all ${
-                              answersStage2[q.id] === true ? "bg-amber-500 text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              answersStage2[q.id] === true ? "bg-[#0056A8] text-white shadow-md scale-105" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                             }`} 
                             variant="ghost" onClick={() => handleAnswer2(q.id, true)}>Oui</Button>
                           <Button 
@@ -970,21 +994,30 @@ const NasqScreeningModule: React.FC = () => {
                       <CardContent className="p-6">
                         <div className="flex items-center justify-between mb-4 px-1">
                           <span className="text-sm font-black text-slate-400 uppercase tracking-widest">Progression M-CHAT-R</span>
-                          <span className="text-base font-black text-amber-600 bg-amber-50 px-3 py-1 rounded-lg">{answeredCount2} / {M_CHAT_R_QUESTIONS.length}</span>
+                          <span className="text-base font-black text-[#0056A8] bg-blue-50 px-3 py-1 rounded-lg">{answeredCount2} / {M_CHAT_R_QUESTIONS.length}</span>
                         </div>
                         <div className="w-full bg-slate-100 h-3 rounded-full mb-6 overflow-hidden">
-                          <div className="h-full transition-all duration-500 ease-out rounded-full bg-gradient-to-r from-amber-400 to-amber-500" style={{ width: `${(answeredCount2 / M_CHAT_R_QUESTIONS.length) * 100}%` }} />
+                          <div className="h-full transition-all duration-500 ease-out rounded-full bg-gradient-to-r from-[#00A3E0] to-[#0056A8]" style={{ width: `${(answeredCount2 / M_CHAT_R_QUESTIONS.length) * 100}%` }} />
                         </div>
-                        <Button 
-                          className={`w-full h-16 text-lg rounded-xl font-black transition-all ${
-                            answeredCount2 === M_CHAT_R_QUESTIONS.length ? 'bg-[#0056A8] hover:bg-[#004080] text-white shadow-xl hover:-translate-y-1' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                          }`} 
-                          disabled={isSubmitting || answeredCount2 < M_CHAT_R_QUESTIONS.length} 
-                          onClick={() => submitData(true)}
-                        >
-                          {isSubmitting ? <Loader2 className="animate-spin mr-3 h-6 w-6" /> : <CheckCircle2 className="mr-3 h-6 w-6" />}
-                          {answeredCount2 < M_CHAT_R_QUESTIONS.length ? `Terminez les questions restantes` : `Enregistrer l'évaluation complète`}
-                        </Button>
+                        <div className="flex gap-4">
+                           <Button 
+                             className="h-16 w-32 rounded-xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200"
+                             onClick={() => setStage(1)}
+                             disabled={isSubmitting}
+                           >
+                             Retour
+                           </Button>
+                           <Button 
+                             className={`flex-1 h-16 text-lg rounded-xl font-black transition-all ${
+                               answeredCount2 === M_CHAT_R_QUESTIONS.length ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl hover:-translate-y-1' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                             }`} 
+                             disabled={isSubmitting || answeredCount2 < M_CHAT_R_QUESTIONS.length} 
+                             onClick={() => submitData(true)}
+                           >
+                             {isSubmitting ? <Loader2 className="animate-spin mr-3 h-6 w-6" /> : <CheckCircle2 className="mr-3 h-6 w-6" />}
+                             {answeredCount2 < M_CHAT_R_QUESTIONS.length ? `Terminez les questions restantes` : `Enregistrer l'évaluation complète`}
+                           </Button>
+                        </div>
                       </CardContent>
                     </Card>
                   </div>
@@ -997,27 +1030,47 @@ const NasqScreeningModule: React.FC = () => {
       </div>
 
       {/* ========================================================================= */}
-      {/* MODAL : SENSIBILISATION (S'affiche après un M-CHAT complété) */}
+      {/* NOUVEAU MODAL : ORIENTATION (Remplace le simple message de sensibilisation) */}
       {/* ========================================================================= */}
-      <Dialog open={showSensibilisationPopup} onOpenChange={setShowSensibilisationPopup}>
-        <DialogContent className="max-w-md rounded-3xl p-6 bg-white border-2 border-red-100">
+      <Dialog open={showReferralPopup} onOpenChange={setShowReferralPopup}>
+        <DialogContent className="max-w-md rounded-3xl p-6 bg-white border-2 border-amber-200 shadow-xl">
           <div className="flex flex-col items-center text-center space-y-4">
-            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center">
-              <AlertTriangle className="h-10 w-10 text-red-600" />
+            <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center">
+              <AlertTriangle className="h-10 w-10 text-amber-600" />
             </div>
-            <DialogTitle className="text-2xl font-black text-slate-800">Action Requise</DialogTitle>
-            <DialogDescription className="text-base font-medium text-slate-600">
-              L'évaluation de l'enfant a révélé des signes de risque de Trouble du Neurodéveloppement (TND).
-            </DialogDescription>
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 w-full text-left">
-              <p className="text-sm font-bold text-slate-800 mb-2">Consigne pour l'agent :</p>
+            <div>
+              <DialogTitle className="text-2xl font-black text-slate-800">Risque Détecté</DialogTitle>
+              <DialogDescription className="text-base font-medium text-slate-600 mt-2">
+                Le score de <strong className="text-slate-800">{childName}</strong> indique un risque de Trouble du Neurodéveloppement (TND).
+              </DialogDescription>
+            </div>
+            
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 w-full text-left space-y-3">
+              <p className="text-sm font-bold text-slate-800">Action pour l'agent :</p>
               <p className="text-sm text-slate-600">
-                Veuillez conseiller fermement aux parents de se rendre dans le centre de santé le plus proche pour une consultation médicale spécialisée.
+                Vous devez conseiller aux parents de consulter un médecin spécialiste pour un diagnostic approfondi. 
               </p>
+              <div className="pt-3 border-t border-slate-200">
+                <p className="text-[13px] font-black text-slate-700 uppercase tracking-wider mb-2">Avez-vous procédé à l'orientation ?</p>
+                <div className="flex gap-3">
+                  <Button 
+                    className="flex-1 h-12 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold" 
+                    disabled={isReferralSubmitting}
+                    onClick={() => handleReferral(true)}
+                  >
+                    {isReferralSubmitting ? <Loader2 className="animate-spin h-5 w-5" /> : "Oui, j'ai orienté"}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="flex-1 h-12 border-slate-300 text-slate-600 rounded-xl font-bold"
+                    disabled={isReferralSubmitting}
+                    onClick={() => handleReferral(false)}
+                  >
+                    Non / Refus
+                  </Button>
+                </div>
+              </div>
             </div>
-            <Button className="w-full h-14 text-lg font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl" onClick={() => setShowSensibilisationPopup(false)}>
-              J'ai transmis l'information
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1056,16 +1109,16 @@ const NasqScreeningModule: React.FC = () => {
                </div>
             )}
 
-            {/* Affichage des réponses M-CHAT ou de la liste globale (le form_type détermine ce qui a été fait) */}
+            {/* Affichage des réponses M-CHAT ou de la liste globale */}
             {(selectedHistoryItem?.form_type?.includes('M-CHAT') ? M_CHAT_R_QUESTIONS : [...AGE_BRACKETS.flatMap(b => b.questions)]).map((q, index) => {
               const ans = selectedHistoryItem?.responses?.[q.id];
               if (ans === undefined) return null; // Ne pas afficher les questions non posées
               return (
                 <div key={q.id} className="flex gap-4 p-4 border border-slate-200 rounded-xl bg-white items-center justify-between shadow-sm">
                   <p className="text-sm font-semibold text-slate-700 flex-1">{q.text}</p>
-                  <Badge className={`shrink-0 text-sm font-black w-16 h-8 flex justify-center items-center ${
-                    ans === true ? 'bg-[#0056A8] text-white' : ans === false ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500'
-                  }`}>{ans === true ? 'OUI' : ans === false ? 'NON' : '-'}</Badge>
+                  <Badge className={`shrink-0 text-sm font-black w-24 h-8 flex justify-center items-center ${
+                    ans === true ? 'bg-[#0056A8] text-white' : ans === false ? 'bg-red-500 text-white' : ans === 'NA' ? 'bg-slate-500 text-white' : 'bg-slate-200 text-slate-500'
+                  }`}>{ans === true ? 'OUI' : ans === false ? 'NON' : ans === 'NA' ? 'N/A' : '-'}</Badge>
                 </div>
               )
             })}
@@ -1074,7 +1127,7 @@ const NasqScreeningModule: React.FC = () => {
       </Dialog>
 
       {/* ========================================================================= */}
-      {/* MODAL : RAPPORT MENSUEL (Inchangé) */}
+      {/* MODAL : RAPPORT MENSUEL */}
       {/* ========================================================================= */}
       <Dialog open={isReportModalOpen} onOpenChange={setIsReportModalOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-0">

@@ -36,6 +36,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .single();
 
     if (data) {
+      // 🚨 PROTECTION GLOBALE (Déconnecte un utilisateur si son compte est en attente ou suspendu)
+      if (data.status === 'pending' || data.status === 'suspended') {
+        await supabase.auth.signOut();
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       setUser({
         id: data.id,
         email: data.email,
@@ -100,6 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         first_name: data.firstName,
         last_name: data.lastName,
         role: data.role
+        // Le status 'pending' est géré par ton SignupPage.tsx ou par la valeur par défaut de la base
       }
     ]);
 

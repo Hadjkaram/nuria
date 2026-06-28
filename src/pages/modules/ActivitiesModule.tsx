@@ -31,12 +31,12 @@ interface ActivityItem {
   area: string;
   responsible: string;
   participants: number;
-  target_participants: number; // Modifié pour correspondre à Supabase (snake_case)
+  target_participants: number;
   description: string;
   outcomes?: string;
   families?: number;
-  children_screened?: number; // Modifié pour correspondre à Supabase (snake_case)
-  created_at: string; // Modifié pour correspondre à Supabase (snake_case)
+  children_screened?: number;
+  created_at: string;
 }
 
 const typeConfig: Record<string, { label: Record<string, string>; icon: React.ElementType; color: string }> = {
@@ -64,7 +64,6 @@ const ActivitiesModule: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<ActivityType>('all');
   const [statusFilter, setStatusFilter] = useState<ActivityStatus>('all');
   
-  // NOUVEAUX ÉTATS POUR SUPABASE
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -75,21 +74,19 @@ const ActivitiesModule: React.FC = () => {
     title: '', type: 'home_visit' as ActivityType, date: '', time: '', location: '', area: '', description: '', targetParticipants: '',
   });
 
-  // RÉCUPÉRATION DES DONNÉES EN TEMPS RÉEL
+  // RÉCUPÉRATION DES DONNÉES DEPUIS SUPABASE
   const fetchActivities = async () => {
-    if (!user) return;
     setIsLoading(true);
     try {
+      // Suppression du filtre eq('agent_id') pour que le coordinateur voit tout
       const { data, error } = await supabase
         .from('activities')
         .select('*')
-        .eq('agent_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
       setActivities(data || []);
       
-      // Mettre à jour l'activité sélectionnée si elle a été modifiée
       if (selectedActivity) {
         const updatedSelected = data?.find(a => a.id === selectedActivity.id);
         if (updatedSelected) setSelectedActivity(updatedSelected);
@@ -107,7 +104,7 @@ const ActivitiesModule: React.FC = () => {
   }, [user]);
 
   const filtered = activities.filter(a => {
-    const matchSearch = a.title.toLowerCase().includes(search.toLowerCase()) ||
+    const matchSearch = (a.title || "").toLowerCase().includes(search.toLowerCase()) ||
       (a.location && a.location.toLowerCase().includes(search.toLowerCase())) ||
       (a.area && a.area.toLowerCase().includes(search.toLowerCase())) ||
       (a.responsible && a.responsible.toLowerCase().includes(search.toLowerCase()));
@@ -125,7 +122,6 @@ const ActivitiesModule: React.FC = () => {
     totalScreened: activities.reduce((s, a) => s + (a.children_screened || 0), 0),
   };
 
-  // SAUVEGARDE DANS SUPABASE
   const handleCreate = async () => {
     if (!newActivity.title.trim() || !newActivity.date) return;
     setIsSaving(true);
@@ -140,7 +136,7 @@ const ActivitiesModule: React.FC = () => {
         time: newActivity.time,
         location: newActivity.location,
         area: newActivity.area,
-        responsible: user ? `${user.firstName} ${user.lastName}` : 'Moi',
+        responsible: user ? `${user.firstName} ${user.lastName}` : 'Coordination',
         target_participants: parseInt(newActivity.targetParticipants) || 0,
         description: newActivity.description
       }]);
@@ -150,7 +146,7 @@ const ActivitiesModule: React.FC = () => {
       toast({ title: "Succès", description: "Activité planifiée avec succès." });
       setNewActivity({ title: '', type: 'home_visit', date: '', time: '', location: '', area: '', description: '', targetParticipants: '' });
       setShowCreate(false);
-      fetchActivities(); // Rafraîchir la liste
+      fetchActivities(); 
     } catch (error: any) {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     } finally {
@@ -158,18 +154,17 @@ const ActivitiesModule: React.FC = () => {
     }
   };
 
-  // MISE À JOUR STATUT DANS SUPABASE
   const updateStatus = async (id: string, status: ActivityStatus) => {
     try {
       const { error } = await supabase.from('activities').update({ status }).eq('id', id);
       if (error) throw error;
       fetchActivities();
+      toast({ title: "Statut mis à jour" });
     } catch (error: any) {
       toast({ title: "Erreur", description: "Mise à jour impossible.", variant: "destructive" });
     }
   };
 
-  // SUPPRESSION DANS SUPABASE
   const deleteActivity = async (id: string) => {
     if(!window.confirm("Voulez-vous vraiment supprimer cette activité ?")) return;
     try {
@@ -187,18 +182,15 @@ const ActivitiesModule: React.FC = () => {
   const l = {
     fr: { title: 'Activités terrain', search: 'Rechercher une activité...', newActivity: 'Nouvelle activité', total: 'Total', planned: 'Planifiées', inProgress: 'En cours', completed: 'Terminées', participants: 'Participants', screened: 'Enfants dépistés', all: 'Toutes', details: 'Détails', date: 'Date', time: 'Horaire', location: 'Lieu', area: 'Zone', responsible: 'Responsable', target: 'Objectif', progress: 'Progression', outcomes: 'Résultats', families: 'Familles', type: 'Type', status: 'Statut', description: 'Description', create: 'Créer', cancel: 'Annuler', activityTitle: 'Titre', targetParticipants: 'Participants visés', noResults: 'Aucune activité trouvée', selectActivity: 'Sélectionnez une activité', start: 'Démarrer', complete: 'Terminer', delete: 'Supprimer', actions: 'Actions' },
     en: { title: 'Field activities', search: 'Search activities...', newActivity: 'New activity', total: 'Total', planned: 'Planned', inProgress: 'In progress', completed: 'Completed', participants: 'Participants', screened: 'Children screened', all: 'All', details: 'Details', date: 'Date', time: 'Time', location: 'Location', area: 'Area', responsible: 'Responsible', target: 'Target', progress: 'Progress', outcomes: 'Outcomes', families: 'Families', type: 'Type', status: 'Status', description: 'Description', create: 'Create', cancel: 'Cancel', activityTitle: 'Title', targetParticipants: 'Target participants', noResults: 'No activities found', selectActivity: 'Select an activity', start: 'Start', complete: 'Complete', delete: 'Delete', actions: 'Actions' },
-    pt: { title: 'Atividades de campo', search: 'Pesquisar atividades...', newActivity: 'Nova atividade', total: 'Total', planned: 'Planejadas', inProgress: 'Em andamento', completed: 'Concluídas', participants: 'Participantes', screened: 'Crianças triadas', all: 'Todas', details: 'Detalhes', date: 'Data', time: 'Horário', location: 'Local', area: 'Zona', responsible: 'Responsável', target: 'Objetivo', progress: 'Progresso', outcomes: 'Resultados', families: 'Famílias', type: 'Tipo', status: 'Status', description: 'Descrição', create: 'Criar', cancel: 'Cancelar', activityTitle: 'Título', targetParticipants: 'Participantes alvo', noResults: 'Nenhuma atividade encontrada', selectActivity: 'Selecione uma atividade', start: 'Iniciar', complete: 'Concluir', delete: 'Excluir', actions: 'Ações' },
-    ar: { title: 'الأنشطة الميدانية', search: 'البحث عن نشاط...', newActivity: 'نشاط جديد', total: 'الإجمالي', planned: 'مخططة', inProgress: 'جارية', completed: 'مكتملة', participants: 'المشاركون', screened: 'الأطفال المفحوصون', all: 'الكل', details: 'التفاصيل', date: 'التاريخ', time: 'الوقت', location: 'المكان', area: 'المنطقة', responsible: 'المسؤول', target: 'الهدف', progress: 'التقدم', outcomes: 'النتائج', families: 'العائلات', type: 'النوع', status: 'الحالة', description: 'الوصف', create: 'إنشاء', cancel: 'إلغاء', activityTitle: 'العنوان', targetParticipants: 'المشاركون المستهدفون', noResults: 'لا توجد أنشطة', selectActivity: 'اختر نشاطًا', start: 'بدء', complete: 'إنهاء', delete: 'حذف', actions: 'إجراءات' },
-  }[lang] || { title: 'Activités', search: 'Rechercher...', newActivity: 'Nouveau', total: 'Total', planned: 'Planifiées', inProgress: 'En cours', completed: 'Terminées', participants: 'Participants', screened: 'Dépistés', all: 'Toutes', details: 'Détails', date: 'Date', time: 'Horaire', location: 'Lieu', area: 'Zone', responsible: 'Responsable', target: 'Objectif', progress: 'Progression', outcomes: 'Résultats', families: 'Familles', type: 'Type', status: 'Statut', description: 'Description', create: 'Créer', cancel: 'Annuler', activityTitle: 'Titre', targetParticipants: 'Visés', noResults: 'Aucune', selectActivity: 'Sélectionner', start: 'Démarrer', complete: 'Terminer', delete: 'Supprimer', actions: 'Actions' };
+  }[lang] || { title: 'Activités' };
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">{l.title}</h1>
-            <p className="text-muted-foreground text-sm">{stats.total} activités</p>
+            <p className="text-muted-foreground text-sm">{stats.total} activités réelles</p>
           </div>
           <Dialog open={showCreate} onOpenChange={setShowCreate}>
             <DialogTrigger asChild>
@@ -220,7 +212,7 @@ const ActivitiesModule: React.FC = () => {
                       <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {Object.entries(typeConfig).map(([key, cfg]) => (
-                          <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+                          <SelectItem key={key} value={key}>{cfg.label[lang] || cfg.label['fr']}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -266,7 +258,6 @@ const ActivitiesModule: React.FC = () => {
           </Dialog>
         </div>
 
-        {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
             { label: l.total, value: stats.total, icon: Activity, color: 'text-primary' },
@@ -288,7 +279,6 @@ const ActivitiesModule: React.FC = () => {
           ))}
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -299,7 +289,7 @@ const ActivitiesModule: React.FC = () => {
             <SelectContent>
               <SelectItem value="all">{l.all}</SelectItem>
               {Object.entries(typeConfig).map(([key, cfg]) => (
-                <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+                <SelectItem key={key} value={key}>{cfg.label[lang] || cfg.label['fr']}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -308,15 +298,13 @@ const ActivitiesModule: React.FC = () => {
             <SelectContent>
               <SelectItem value="all">{l.all}</SelectItem>
               {Object.entries(statusConfig).map(([key, cfg]) => (
-                <SelectItem key={key} value={key}>{cfg.label[lang]}</SelectItem>
+                <SelectItem key={key} value={key}>{cfg.label[lang] || cfg.label['fr']}</SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* Content */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Activity list */}
           <div className="lg:col-span-2 space-y-3">
             {isLoading ? (
                <Card><CardContent className="p-12 text-center flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></CardContent></Card>
@@ -342,7 +330,7 @@ const ActivitiesModule: React.FC = () => {
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <p className="font-semibold text-foreground">{activity.title}</p>
                           <Badge className={`text-xs flex-shrink-0 ${statusConfig[activity.status]?.style || ''}`}>
-                            {statusConfig[activity.status]?.label[lang]}
+                            {statusConfig[activity.status]?.label[lang] || statusConfig[activity.status]?.label['fr']}
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-1 mb-2">{activity.description}</p>
@@ -370,26 +358,19 @@ const ActivitiesModule: React.FC = () => {
             })}
           </div>
 
-          {/* Detail panel */}
           <div>
-            {selectedActivity ? (() => {
-              const typeCfg = typeConfig[selectedActivity.type];
-              const Icon = typeCfg?.icon || Activity;
-              const progressPercent = selectedActivity.target_participants > 0
-                ? Math.round((selectedActivity.participants / selectedActivity.target_participants) * 100) : 0;
-
-              return (
+            {selectedActivity ? (
                 <Card className="sticky top-20">
                   <CardHeader className="pb-3">
                     <div className="flex items-center gap-2 mb-2">
-                      <div className={`p-2 rounded-lg bg-muted ${typeCfg?.color}`}><Icon className="h-5 w-5" /></div>
-                      <Badge variant="outline" className="text-xs">{typeCfg?.label[lang]}</Badge>
+                      <div className={`p-2 rounded-lg bg-muted ${typeConfig[selectedActivity.type]?.color}`}><Activity className="h-5 w-5" /></div>
+                      <Badge variant="outline" className="text-xs">{typeConfig[selectedActivity.type]?.label[lang] || typeConfig[selectedActivity.type]?.label['fr']}</Badge>
                     </div>
                     <CardTitle className="text-lg">{selectedActivity.title}</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <Badge className={`${statusConfig[selectedActivity.status]?.style}`}>
-                      {statusConfig[selectedActivity.status]?.label[lang]}
+                      {statusConfig[selectedActivity.status]?.label[lang] || statusConfig[selectedActivity.status]?.label['fr']}
                     </Badge>
 
                     <div className="space-y-3 text-sm">
@@ -400,51 +381,11 @@ const ActivitiesModule: React.FC = () => {
                       <div className="flex justify-between"><span className="text-muted-foreground">{l.responsible}</span><span className="font-medium text-foreground">{selectedActivity.responsible}</span></div>
                     </div>
 
-                    {/* Progress */}
-                    {selectedActivity.target_participants > 0 && (
-                      <div className="bg-muted/50 rounded-lg p-3">
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="text-muted-foreground">{l.progress}</span>
-                          <span className="font-bold text-foreground">{progressPercent}%</span>
-                        </div>
-                        <div className="h-2 bg-background rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${Math.min(progressPercent, 100)}%` }} />
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">{selectedActivity.participants} / {selectedActivity.target_participants} {l.participants.toLowerCase()}</p>
-                      </div>
-                    )}
-
-                    {/* Key metrics */}
-                    {(selectedActivity.families || selectedActivity.children_screened) && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {selectedActivity.families != null && (
-                          <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <p className="text-lg font-bold text-foreground">{selectedActivity.families}</p>
-                            <p className="text-xs text-muted-foreground">{l.families}</p>
-                          </div>
-                        )}
-                        {selectedActivity.children_screened != null && (
-                          <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <p className="text-lg font-bold text-foreground">{selectedActivity.children_screened}</p>
-                            <p className="text-xs text-muted-foreground">{l.screened}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     <div>
                       <p className="text-xs font-medium text-muted-foreground uppercase mb-1">{l.description}</p>
                       <p className="text-sm text-foreground">{selectedActivity.description}</p>
                     </div>
 
-                    {selectedActivity.outcomes && (
-                      <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-                        <p className="text-xs font-medium text-emerald-800 dark:text-emerald-300 uppercase mb-1">{l.outcomes}</p>
-                        <p className="text-sm text-emerald-700 dark:text-emerald-400">{selectedActivity.outcomes}</p>
-                      </div>
-                    )}
-
-                    {/* Actions */}
                     <div className="border-t border-border pt-4 space-y-2">
                       <p className="text-xs font-medium text-muted-foreground uppercase">{l.actions}</p>
                       <div className="flex flex-wrap gap-2">
@@ -465,8 +406,7 @@ const ActivitiesModule: React.FC = () => {
                     </div>
                   </CardContent>
                 </Card>
-              );
-            })() : (
+            ) : (
               <Card>
                 <CardContent className="p-12 text-center text-muted-foreground">
                   <Activity className="h-16 w-16 mx-auto mb-4 opacity-20" />

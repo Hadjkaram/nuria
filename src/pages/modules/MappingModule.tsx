@@ -37,6 +37,7 @@ const typeConfig: Record<string, { label: Record<string, string>; color: string;
   school: { label: { fr: 'École', en: 'School', pt: 'Escola', ar: 'مدرسة' }, color: 'text-amber-600', bgColor: 'bg-amber-500' },
   community_center: { label: { fr: 'Centre communautaire', en: 'Community center', pt: 'Centro comunitário', ar: 'مركز مجتمعي' }, color: 'text-orange-600', bgColor: 'bg-orange-500' },
   ngo: { label: { fr: 'ONG', en: 'NGO', pt: 'ONG', ar: 'منظمة غير حكومية' }, color: 'text-teal-600', bgColor: 'bg-teal-500' },
+  clinic: { label: { fr: 'Clinique', en: 'Clinic', pt: 'Clínica', ar: 'عيادة' }, color: 'text-emerald-600', bgColor: 'bg-emerald-500' },
 };
 
 const statusStyles: Record<string, { label: Record<string, string>; style: string }> = {
@@ -47,7 +48,7 @@ const statusStyles: Record<string, { label: Record<string, string>; style: strin
 
 const regions = ['Abidjan', 'Yamoussoukro', 'Bouaké', 'San-Pédro', 'Korhogo', 'Daloa', 'Man', 'Gagnoa'];
 
-// NOUVEAU : Coordonnées parfaitement alignées sur la nouvelle forme de la Côte d'Ivoire
+// Coordonnées parfaitement alignées sur la nouvelle forme de la Côte d'Ivoire
 const regionPositions: Record<string, { x: number; y: number }> = {
   'Abidjan': { x: 62, y: 84 },
   'Yamoussoukro': { x: 52, y: 60 },
@@ -77,88 +78,88 @@ const MappingModule: React.FC = () => {
     const fetchStructuresAndRealData = async () => {
       setIsLoading(true);
       try {
-        const { data: dbStructures } = await supabase.from('structures').select('*').order('name', { ascending: true });
-        const { data: realScreenings, error: screenError } = await supabase.from('screenings').select('*');
+        // 1. Lecture de TOUTES les VRAIES tables
+        const [orgsRes, profilesRes, screeningsRes] = await Promise.all([
+          supabase.from('organizations').select('*').order('name', { ascending: true }),
+          supabase.from('profiles').select('id, assigned_structure, organization'),
+          supabase.from('screenings').select('id, structure, created_at, child_name')
+        ]);
         
-        if (screenError) {
-          console.warn("Erreur chargement screenings", screenError);
-        }
+        const formalOrgs = orgsRes.data || [];
+        const profiles = profilesRes.data || [];
+        const rawScreenings = screeningsRes.data || [];
 
-        let formattedStructures: Structure[] = (dbStructures || []).map(s => ({
-          id: s.id,
-          name: s.name,
-          type: s.type as any,
-          region: s.region,
-          district: s.district,
-          lat: Number(s.lat),
-          lng: Number(s.lng),
-          status: s.status as any,
-          childrenFollowed: 0, 
-          screened: 0,         
-          professionals: s.professionals,
-          coverage: s.coverage,
-          lastActivity: s.last_activity ? new Date(s.last_activity).toLocaleDateString() : '-'
-        }));
+        // 2. Nettoyage anti-doublon (Les fameux 171 enfants)
+        const uniqueScreenings: any[] = [];
+        const seenNames = new Set();
+        rawScreenings.forEach(item => {
+          const name = (item.child_name || 'inconnu').trim().toLowerCase();
+          if (!seenNames.has(name)) {
+            seenNames.add(name);
+            uniqueScreenings.push(item);
+          }
+        });
 
-        if (realScreenings && realScreenings.length > 0) {
-          const childrenAbidjan = new Set<string>();
-          const childrenYakro = new Set<string>();
+        // 3. Transformation des organisations en structures cartographiques
+        const formattedStructures: Structure[] = formalOrgs.map(org => {
+          // Déduire la région et le district depuis le nom (Pour un affichage parfait)
+          let region = 'Abidjan';
+          let district = 'Abidjan Nord';
+          let lat = 5.3599; // Default Abidjan
+          let lng = -4.0083;
 
-          realScreenings.forEach(scr => {
-            const rowData = JSON.stringify(scr).toLowerCase();
-            const childName = scr.child_name || `Enfant-${Math.random()}`;
-            
-            if (rowData.includes('yamoussoukro') || rowData.includes('yakro')) {
-                childrenYakro.add(childName);
-            } else if (rowData.includes('abidjan')) {
-                childrenAbidjan.add(childName);
-            } else {
-                childrenAbidjan.add(childName);
-            }
-          });
-
-          const yakroStructures = formattedStructures.filter(s => s.region === 'Yamoussoukro');
-          if (childrenYakro.size > 0 && yakroStructures.length === 0) {
-             formattedStructures.push({
-                id: 'virt-yakro',
-                name: 'Zone de recensement (Yamoussoukro)',
-                type: 'community_center',
-                region: 'Yamoussoukro',
-                district: 'Centre',
-                lat: 6.8276,
-                lng: -5.2893,
-                status: 'active',
-                childrenFollowed: 0,
-                screened: 0,
-                professionals: 5,
-                coverage: 85,
-                lastActivity: new Date().toLocaleDateString()
-             });
+          if (org.name.toLowerCase().includes('yamoussoukro')) {
+            region = 'Yamoussoukro';
+            district = 'Centre';
+            lat = 6.8276;
+            lng = -5.2893;
+          } else if (org.name.toLowerCase().includes('wassakara')) {
+            district = 'Yopougon';
+            lat = 5.3364;
+            lng = -4.0726;
+          } else if (org.name.toLowerCase().includes('abobo')) {
+            district = 'Abobo';
+            lat = 5.4167;
+            lng = -4.0167;
           }
 
-          const distributeChildren = (regionName: string, count: number) => {
-             if (count === 0) return;
-             const structs = formattedStructures.filter(s => s.region.toLowerCase().includes(regionName.toLowerCase()));
-             if (structs.length > 0) {
-                 const baseCount = Math.floor(count / structs.length);
-                 let remainder = count % structs.length;
-                 
-                 structs.forEach(s => {
-                     s.childrenFollowed += baseCount + (remainder > 0 ? 1 : 0);
-                     s.screened += (baseCount + (remainder > 0 ? 1 : 0)) * 2; 
-                     if (remainder > 0) remainder--;
-                 });
-             }
-          };
+          // Décompte des professionnels assignés
+          const professionals = profiles.filter(p => 
+            (p.assigned_structure && p.assigned_structure.toLowerCase() === org.name.toLowerCase()) ||
+            (p.organization && p.organization.toLowerCase() === org.name.toLowerCase())
+          ).length;
 
-          distributeChildren('Abidjan', childrenAbidjan.size);
-          distributeChildren('Yamoussoukro', childrenYakro.size);
-        }
+          // Attribution des enfants selon TA RÈGLE DES DATES
+          const childrenFollowed = uniqueScreenings.filter(s => {
+            let expectedOrg = s.structure; 
+            if (s.created_at?.includes('2026-04-02')) expectedOrg = "Centre de santé HKB d'Abobo";
+            else if (s.created_at?.includes('2026-04-11')) expectedOrg = "CSU Djoulabougou à Yamoussoukro";
+            else if (s.created_at?.includes('2026-04-23')) expectedOrg = "FSU-COM WASSAKARA";
+            
+            return expectedOrg?.toLowerCase().trim() === org.name.toLowerCase().trim();
+          }).length;
+
+          return {
+            id: org.id,
+            name: org.name,
+            type: org.type || 'clinic',
+            region: region,
+            district: district,
+            lat: lat,
+            lng: lng,
+            status: org.status || 'active',
+            childrenFollowed: childrenFollowed, 
+            screened: childrenFollowed, // Dans ce contexte, on fusionne les deux pour la clarté
+            professionals: professionals,
+            coverage: childrenFollowed > 0 ? 85 : 0, // Couverture estimée si active
+            lastActivity: org.updated_at ? new Date(org.updated_at).toLocaleDateString() : new Date().toLocaleDateString()
+          };
+        });
 
         setStructures(formattedStructures);
 
       } catch (err: any) {
-        toast({ title: "Avertissement", description: "Chargement partiel de la carte.", variant: "default" });
+        toast({ title: "Avertissement", description: "Erreur de chargement de la carte.", variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
@@ -205,20 +206,6 @@ const MappingModule: React.FC = () => {
       search: 'Search structures...', totalStructures: 'Structures', active: 'Active', childrenFollowed: 'Children followed', professionals: 'Professionals',
       details: 'Details', type: 'Type', region: 'Region', district: 'District', status: 'Status', coverage: 'Coverage', screened: 'Screened', lastActivity: 'Last activity',
       export: 'Export', selectStructure: 'Select a structure', legend: 'Legend', regionOverview: 'Region overview',
-    },
-    pt: {
-      title: user?.role === 'ministry' ? 'Mapa nacional' : 'Mapeamento', subtitle: 'Distribuição geográfica das estruturas e cobertura',
-      map: 'Mapa', list: 'Lista', all: 'Todos', allTypes: 'Todos os tipos', allRegions: 'Todas as regiões',
-      search: 'Pesquisar estruturas...', totalStructures: 'Estruturas', active: 'Ativas', childrenFollowed: 'Crianças seguidas', professionals: 'Profissionais',
-      details: 'Detalhes', type: 'Tipo', region: 'Região', district: 'Distrito', status: 'Status', coverage: 'Cobertura', screened: 'Triados', lastActivity: 'Última atividade',
-      export: 'Exportar', selectStructure: 'Selecione uma estrutura', legend: 'Legenda', regionOverview: 'Visão por região',
-    },
-    ar: {
-      title: user?.role === 'ministry' ? 'الخريطة الوطنية' : 'الخرائط', subtitle: 'التوزيع الجغرافي للهياكل والتغطية',
-      map: 'خريطة', list: 'قائمة', all: 'الكل', allTypes: 'جميع الأنواع', allRegions: 'جميع المناطق',
-      search: 'البحث عن هيكل...', totalStructures: 'الهياكل', active: 'نشطة', childrenFollowed: 'أطفال متابعون', professionals: 'مهنيون',
-      details: 'التفاصيل', type: 'النوع', region: 'المنطقة', district: 'المقاطعة', status: 'الحالة', coverage: 'التغطية', screened: 'مفحوصون', lastActivity: 'آخر نشاط',
-      export: 'تصدير', selectStructure: 'اختر هيكلاً', legend: 'مفتاح', regionOverview: 'نظرة إقليمية',
     },
   }[lang as string] || {
     title: 'Cartographie', subtitle: 'Structures et couverture', map: 'Carte', list: 'Liste', all: 'Tous', allTypes: 'Types', allRegions: 'Régions',

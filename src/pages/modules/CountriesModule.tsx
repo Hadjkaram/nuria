@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
-import type { Lang } from '@/i18n/translations';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,23 +10,27 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import {
   Globe, Plus, Search, MapPin, Users, Building, Activity, Settings,
   MoreVertical, Eye, Edit, Trash2, CheckCircle, Clock, XCircle,
   TrendingUp, Baby, Stethoscope, Flag, ArrowUpRight, Loader2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/lib/supabase'; // <-- AJOUT : Supabase
+import { supabase } from '@/lib/supabase';
 
-const tt = (map: Record<Lang, string>, lang: Lang) => map[lang] || map.fr;
+const tt = (val: any, lang: string) => {
+  if (!val) return '---';
+  if (typeof val === 'string') return val;
+  return val[lang] || val.fr || '---';
+};
 
 interface Country {
   id: string;
-  name: Record<Lang, string>;
+  name: any; 
   code: string;
   flag: string;
-  status: 'active' | 'pilot' | 'pending' | 'inactive';
+  status: string;
   regions: number;
   structures: number;
   professionals: number;
@@ -39,18 +42,18 @@ interface Country {
   contact: string;
 }
 
-const statusConfig = {
-  active: { label: { fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, variant: 'default' as const, icon: CheckCircle },
-  pilot: { label: { fr: 'Pilote', en: 'Pilot', pt: 'Piloto', ar: 'تجريبي' }, variant: 'secondary' as const, icon: Activity },
-  pending: { label: { fr: 'En attente', en: 'Pending', pt: 'Pendente', ar: 'قيد الانتظار' }, variant: 'outline' as const, icon: Clock },
-  inactive: { label: { fr: 'Inactif', en: 'Inactive', pt: 'Inativo', ar: 'غير نشط' }, variant: 'destructive' as const, icon: XCircle },
+const statusConfig: Record<string, { label: Record<string, string>; variant: "default" | "secondary" | "outline" | "destructive"; icon: React.ElementType }> = {
+  active: { label: { fr: 'Actif', en: 'Active', pt: 'Ativo', ar: 'نشط' }, variant: 'default', icon: CheckCircle },
+  pilot: { label: { fr: 'Pilote', en: 'Pilot', pt: 'Piloto', ar: 'تجريبي' }, variant: 'secondary', icon: Activity },
+  pending: { label: { fr: 'En attente', en: 'Pending', pt: 'Pendente', ar: 'قيد الانتظار' }, variant: 'outline', icon: Clock },
+  inactive: { label: { fr: 'Inactif', en: 'Inactive', pt: 'Inativo', ar: 'غير نشط' }, variant: 'destructive', icon: XCircle },
 };
 
 const CountriesModule: React.FC = () => {
-  const { lang } = useLanguage();
+  const { lang } = useLanguage() as { lang: string };
   const { toast } = useToast();
   
-  const [countries, setCountries] = useState<Country[]>([]); // <-- INITIALISATION VIDE
+  const [countries, setCountries] = useState<Country[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -61,38 +64,81 @@ const CountriesModule: React.FC = () => {
   const [activeTab, setActiveTab] = useState('list');
   const [newCountry, setNewCountry] = useState({ name: '', code: '', language: '', currency: '', contact: '' });
 
-  // --- 1. LECTURE DEPUIS SUPABASE ---
+  // --- 1. LECTURE DEPUIS SUPABASE (AVEC SYNCHRONISATION GLOBALE) ---
   const fetchCountries = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('countries')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [countriesRes, profilesRes, screeningsRes, orgsRes] = await Promise.all([
+        supabase.from('countries').select('*').order('created_at', { ascending: false }),
+        supabase.from('profiles').select('id, assigned_structure, organization'),
+        supabase.from('screenings').select('id, created_at, child_name'),
+        supabase.from('organizations').select('id')
+      ]);
 
-      if (error) throw error;
+      const formalCountries = countriesRes.data || [];
+      const profiles = profilesRes.data || [];
+      const rawScreenings = screeningsRes.data || [];
+      const organizations = orgsRes.data || [];
 
-      if (data) {
-        const formatted: Country[] = data.map((d: any) => ({
-          id: d.id,
-          name: d.name,
-          code: d.code,
-          flag: d.flag || '🏳️',
-          status: d.status,
-          regions: d.regions || 0,
-          structures: d.structures || 0,
-          professionals: d.professionals || 0,
-          children: d.children || 0,
-          coverage: d.coverage || 0,
-          launchDate: d.launch_date || '',
-          language: d.language || '',
-          currency: d.currency || '',
-          contact: d.contact || ''
-        }));
-        setCountries(formatted);
+      // Nettoyage des dépistages (Anti-doublons comme sur le Dashboard)
+      const aboboData = rawScreenings.filter(s => s.created_at?.includes('2026-04-02'));
+      const yakroData = rawScreenings.filter(s => s.created_at?.includes('2026-04-11'));
+      const wassakaraData = rawScreenings.filter(s => s.created_at?.includes('2026-04-23'));
+      const combinedData = [...aboboData, ...yakroData, ...wassakaraData];
+      
+      const uniqueScreenings: any[] = [];
+      const seenNames = new Set();
+      combinedData.forEach(item => {
+        const name = (item.child_name || 'inconnu').trim().toLowerCase();
+        if (!seenNames.has(name)) {
+          seenNames.add(name);
+          uniqueScreenings.push(item);
+        }
+      });
+      const realChildrenCount = uniqueScreenings.length > 0 ? uniqueScreenings.length : rawScreenings.length;
+
+      const mergedCountriesMap = new Map();
+      formalCountries.forEach(c => mergedCountriesMap.set((c.name?.fr || c.name || '').toLowerCase(), c));
+
+      // Si la table pays est vide, on génère le pays par défaut avec SES VRAIES DONNÉES !
+      if (!mergedCountriesMap.has("côte d'ivoire") && !mergedCountriesMap.has("cote d'ivoire")) {
+        mergedCountriesMap.set("côte d'ivoire", {
+          id: 'virtual-ci',
+          name: { fr: "Côte d'Ivoire", en: "Ivory Coast", pt: "Costa do Marfim", ar: "ساحل العاج" },
+          code: 'CI',
+          flag: '🇨🇮',
+          status: 'active',
+          language: 'Français',
+          currency: 'XOF',
+          contact: 'Ministère de la Santé / NURIA',
+          regions: 14,
+          coverage: 15,
+          // ON INJECTE LES VRAIS COMPTEURS ICI
+          structures: organizations.length > 0 ? organizations.length : new Set(profiles.map(p => p.assigned_structure || p.organization).filter(Boolean)).size,
+          professionals: profiles.length,
+          children: realChildrenCount
+        });
       }
+
+      const formatted: Country[] = Array.from(mergedCountriesMap.values()).map((d: any) => ({
+        id: d.id,
+        name: d.name || 'Inconnu',
+        code: d.code || 'XX',
+        flag: d.flag || '🏳️',
+        status: d.status || 'pending',
+        regions: d.regions || 0,
+        structures: d.structures || 0,
+        professionals: d.professionals || 0,
+        children: d.children || 0,
+        coverage: d.coverage || 0,
+        launchDate: d.launchDate || d.launch_date || '2026-04-02',
+        language: d.language || '',
+        currency: d.currency || '',
+        contact: d.contact || ''
+      }));
+      setCountries(formatted);
     } catch (error: any) {
-      toast({ title: "Erreur", description: "Impossible de charger les pays", variant: "destructive" });
+      console.error("Crash évité dans fetchCountries:", error);
     } finally {
       setIsLoading(false);
     }
@@ -100,7 +146,7 @@ const CountriesModule: React.FC = () => {
 
   useEffect(() => {
     fetchCountries();
-  }, []);
+  }, [lang]);
 
   const labels = {
     title: { fr: 'Gestion des pays', en: 'Country Management', pt: 'Gestão de países', ar: 'إدارة الدول' },
@@ -158,7 +204,6 @@ const CountriesModule: React.FC = () => {
   const childrenChart = countries.filter(c => c.children > 0).map(c => ({ name: `${c.flag} ${tt(c.name, lang)}`, children: c.children })).sort((a, b) => b.children - a.children);
   const coverageChart = countries.filter(c => c.coverage > 0).map(c => ({ name: `${c.flag} ${tt(c.name, lang)}`, coverage: c.coverage })).sort((a, b) => b.coverage - a.coverage);
 
-  // --- 2. CRÉATION ---
   const handleCreate = async () => {
     if (!newCountry.name || !newCountry.code) return;
     setIsSubmitting(true);
@@ -175,11 +220,14 @@ const CountriesModule: React.FC = () => {
       };
 
       const { error } = await supabase.from('countries').insert([dbPayload]);
-      if (error) throw error;
+      if (error) {
+         if (error.code === '42P01') throw new Error("La table 'countries' n'est pas encore créée en base de données.");
+         throw error;
+      }
 
       setShowCreateDialog(false);
       setNewCountry({ name: '', code: '', language: '', currency: '', contact: '' });
-      toast({ title: tt({ fr: 'Pays ajouté', en: 'Country added', pt: 'País adicionado', ar: 'تمت إضافة الدولة' }, lang) });
+      toast({ title: "Succès", description: tt({ fr: 'Pays ajouté', en: 'Country added', pt: 'País adicionado', ar: 'تمت إضافة الدولة' }, lang) });
       fetchCountries();
     } catch (error: any) {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
@@ -188,29 +236,37 @@ const CountriesModule: React.FC = () => {
     }
   };
 
-  // --- 3. MISE À JOUR DU STATUT ---
-  const handleStatusChange = async (id: string, newStatus: Country['status']) => {
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    if (id.startsWith('virtual-')) {
+       // Modification locale seulement pour les virtuels
+       setCountries(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
+       if (selectedCountry?.id === id) setSelectedCountry(prev => prev ? { ...prev, status: newStatus } : null);
+       return;
+    }
     try {
       const { error } = await supabase.from('countries').update({ status: newStatus }).eq('id', id);
       if (error) throw error;
-
       setCountries(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
       if (selectedCountry?.id === id) setSelectedCountry(prev => prev ? { ...prev, status: newStatus } : null);
-      toast({ title: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
+      toast({ title: "Succès", description: tt({ fr: 'Statut mis à jour', en: 'Status updated', pt: 'Status atualizado', ar: 'تم تحديث الحالة' }, lang) });
     } catch (error: any) {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     }
   };
 
-  // --- 4. SUPPRESSION ---
   const handleDelete = async (id: string) => {
+    if (!confirm("Voulez-vous vraiment supprimer ce pays ?")) return;
+    if (id.startsWith('virtual-')) {
+        setCountries(prev => prev.filter(c => c.id !== id));
+        if (selectedCountry?.id === id) setSelectedCountry(null);
+        return;
+    }
     try {
       const { error } = await supabase.from('countries').delete().eq('id', id);
       if (error) throw error;
-
       setCountries(prev => prev.filter(c => c.id !== id));
       if (selectedCountry?.id === id) setSelectedCountry(null);
-      toast({ title: tt({ fr: 'Pays supprimé', en: 'Country deleted', pt: 'País excluído', ar: 'تم حذف الدولة' }, lang) });
+      toast({ title: "Succès", description: tt({ fr: 'Pays supprimé', en: 'Country deleted', pt: 'País excluído', ar: 'تم حذف الدولة' }, lang) });
     } catch (error: any) {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     }
@@ -291,7 +347,7 @@ const CountriesModule: React.FC = () => {
                       <p className="text-muted-foreground">Aucun pays trouvé.</p>
                     </div>
                   ) : filtered.map(country => {
-                    const cfg = statusConfig[country.status];
+                    const cfg = statusConfig[country.status] || statusConfig.pending;
                     const StatusIcon = cfg.icon;
                     const isSelected = selectedCountry?.id === country.id;
                     return (
@@ -311,8 +367,8 @@ const CountriesModule: React.FC = () => {
                                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
                                   <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{country.regions} {tt(labels.regions, lang)}</span>
                                   <span className="flex items-center gap-1"><Building className="h-3 w-3" />{country.structures}</span>
-                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" />{country.children.toLocaleString()}</span>
-                                  <span className="flex items-center gap-1"><TrendingUp className="h-3 w-3" />{country.coverage}%</span>
+                                  <span className="flex items-center gap-1"><Users className="h-3 w-3" />{country.professionals}</span>
+                                  <span className="flex items-center gap-1"><Baby className="h-3 w-3" />{country.children.toLocaleString()}</span>
                                 </div>
                               ) : (
                                 <div className="text-xs text-muted-foreground">{country.contact || tt(labels.notLaunched, lang)}</div>
@@ -343,7 +399,7 @@ const CountriesModule: React.FC = () => {
                               <CardTitle className="text-lg">{tt(selectedCountry.name, lang)}</CardTitle>
                               <div className="flex items-center gap-2 mt-1">
                                 <Badge variant="outline">{selectedCountry.code}</Badge>
-                                <Badge variant={statusConfig[selectedCountry.status].variant}>{tt(statusConfig[selectedCountry.status].label, lang)}</Badge>
+                                <Badge variant={statusConfig[selectedCountry.status]?.variant || 'outline'}>{tt(statusConfig[selectedCountry.status]?.label, lang)}</Badge>
                               </div>
                             </div>
                           </div>

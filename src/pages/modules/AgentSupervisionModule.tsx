@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 
 // Imports pour la VRAIE carte Leaflet
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -37,6 +37,13 @@ const alertIcon = new L.Icon({
   shadowSize: [41, 41]
 });
 
+// Composant utilitaire pour ajuster la vue de la carte
+const ChangeView = ({ center, zoom }: { center: [number, number], zoom: number }) => {
+  const map = useMap();
+  map.setView(center, zoom);
+  return null;
+};
+
 interface AgentStat {
   id: string;
   name: string;
@@ -55,7 +62,7 @@ interface LiveScreening {
   agent_name: string;
   latitude: number | null;
   longitude: number | null;
-  structure: string | null; // Ajouté pour le filtrage
+  structure: string | null;
 }
 
 const AgentSupervisionModule: React.FC = () => {
@@ -68,17 +75,20 @@ const AgentSupervisionModule: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [todayTotal, setTodayTotal] = useState(0);
 
-  // NOUVEAU : État pour la structure du superviseur
   const [supervisorStructure, setSupervisorStructure] = useState<string | null>(null);
+  const [isGeneralSupervisor, setIsGeneralSupervisor] = useState(false);
 
+  const [recentActionAgentId, setRecentActionAgentId] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<AgentStat | null>(null);
   const [agentHistory, setAgentHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-
   const [selectedScreening, setSelectedScreening] = useState<any | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  const defaultCenter: [number, number] = [5.359951, -4.008256];
+  // Centre par défaut
+  const defaultCenter: [number, number] = [5.353075, -4.068323];
+  const [mapCenter, setMapCenter] = useState<[number, number]>(defaultCenter);
+  const [mapZoom, setMapZoom] = useState(12);
 
   const handleLogout = async () => {
     await logout();
@@ -89,7 +99,6 @@ const AgentSupervisionModule: React.FC = () => {
     try {
       if (!user) return;
 
-      // 1. Déterminer la structure du superviseur connecté
       const { data: profileData } = await supabase
         .from('profiles')
         .select('assigned_structure')
@@ -99,33 +108,48 @@ const AgentSupervisionModule: React.FC = () => {
       const myStructure = profileData?.assigned_structure || null;
       setSupervisorStructure(myStructure);
 
-      // 2. Récupérer les profils (Filtrés par structure si le superviseur en a une)
+      // 🚨 CORRECTION BLINDÉE : On s'assure que le superviseur général voit TOUT
+      const isGeneral = 
+        ['program', 'orgAdmin', 'superAdmin'].includes(user?.role || '') || 
+        (user?.role === 'supervisor' && (!myStructure || myStructure.trim() === '' || /coordination|général|national|toutes/i.test(myStructure))) ||
+        user?.email === 'superviseur1@enuria.net'; // Sécurité absolue pour Mireille
+        
+      setIsGeneralSupervisor(isGeneral);
+
+      if (isGeneral) {
+          // Vue Globale : Zoom arrière sur Abidjan
+          setMapCenter([5.359951, -4.008256]);
+          setMapZoom(11);
+      } else {
+          // Vue Locale : Zoom sur la zone (ex: Wassakara)
+          setMapCenter([5.353075, -4.068323]);
+          setMapZoom(15);
+      }
+
       let profilesQuery = supabase
         .from('profiles')
         .select('id, first_name, last_name, assigned_structure')
         .in('role', ['community', 'professional']);
 
-      if (myStructure) {
+      if (!isGeneral && myStructure) {
         profilesQuery = profilesQuery.eq('assigned_structure', myStructure);
       }
 
       const { data: profiles, error: profilesError } = await profilesQuery;
       if (profilesError) throw profilesError;
 
-      // 3. Récupérer les screenings (Filtrés par structure si le superviseur en a une)
       let screeningsQuery = supabase
         .from('screenings')
         .select('id, agent_id, risk_level, created_at, child_name, location, score, latitude, longitude, structure')
         .order('created_at', { ascending: false });
 
-      if (myStructure) {
+      if (!isGeneral && myStructure) {
         screeningsQuery = screeningsQuery.eq('structure', myStructure);
       }
 
       const { data: screenings, error: screeningsError } = await screeningsQuery;
       if (screeningsError) throw screeningsError;
 
-      // 4. Construire les statistiques
       const statsMap = new Map<string, AgentStat>();
       profiles?.forEach(p => {
         statsMap.set(p.id, { id: p.id, name: `${p.first_name} ${p.last_name}`, totalScreenings: 0, atRiskCount: 0, lastActive: null });
@@ -133,12 +157,12 @@ const AgentSupervisionModule: React.FC = () => {
 
       let todayCount = 0;
       const recentFeed: LiveScreening[] = [];
+      let latestValidCoords: [number, number] | null = null;
 
       screenings?.forEach((s, index) => {
         const isToday = new Date(s.created_at).toDateString() === new Date().toDateString();
         if (isToday) todayCount++;
 
-        // Ne compter l'agent que s'il fait partie de la liste autorisée (sa structure)
         if (s.agent_id && statsMap.has(s.agent_id)) {
           const stat = statsMap.get(s.agent_id)!;
           stat.totalScreenings++;
@@ -153,12 +177,21 @@ const AgentSupervisionModule: React.FC = () => {
             risk_level: s.risk_level, score: s.score, created_at: s.created_at,
             agent_name: agentName, latitude: s.latitude, longitude: s.longitude, structure: s.structure
           });
+
+          if (!latestValidCoords && s.latitude && s.longitude && !isGeneral) {
+             latestValidCoords = [s.latitude, s.longitude];
+          }
         }
       });
 
       setAgentsStats(Array.from(statsMap.values()).sort((a, b) => b.totalScreenings - a.totalScreenings));
       setLiveFeed(recentFeed);
       setTodayTotal(todayCount);
+
+      if (latestValidCoords && !isGeneral) {
+        setMapCenter(latestValidCoords);
+      }
+
     } catch (error: any) {
       toast({ title: "Erreur", description: "Impossible de charger les données.", variant: "destructive" });
     }
@@ -166,9 +199,20 @@ const AgentSupervisionModule: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
+    
     const channel = supabase.channel('public:screenings')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'screenings' }, () => fetchDashboardData())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'screenings' }, (payload) => {
+        const newAgentId = payload.new.agent_id;
+        if (newAgentId) {
+          setRecentActionAgentId(newAgentId);
+          setTimeout(() => {
+            setRecentActionAgentId(null);
+          }, 3000);
+        }
+        fetchDashboardData();
+      })
       .subscribe();
+      
     return () => { supabase.removeChannel(channel); };
   }, [user]);
 
@@ -253,14 +297,14 @@ const AgentSupervisionModule: React.FC = () => {
             <div className="flex items-center gap-2">
               <Signal className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-400 animate-pulse" />
               <h1 className="font-bold text-sm sm:text-lg tracking-wide whitespace-nowrap">
-                Tour de Contrôle {supervisorStructure ? `• ${supervisorStructure}` : ''}
+                Tour de Contrôle {isGeneralSupervisor ? 'Globale' : (supervisorStructure ? `• ${supervisorStructure}` : '')}
               </h1>
             </div>
           </div>
           <div className="flex items-center gap-3 sm:gap-6">
             <div className="text-right hidden md:block">
               <div className="text-sm font-bold text-white">{user?.firstName} {user?.lastName}</div>
-              <div className="text-xs text-blue-200 uppercase tracking-wider font-medium">Superviseur</div>
+              <div className="text-xs text-blue-200 uppercase tracking-wider font-medium">{isGeneralSupervisor ? 'Superviseur Général' : 'Superviseur Local'}</div>
             </div>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-white hover:bg-white/10 hover:text-white rounded-full px-2 sm:px-4">
               <LogOut className="h-4 w-4 sm:mr-2" />
@@ -272,7 +316,7 @@ const AgentSupervisionModule: React.FC = () => {
 
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto w-full space-y-6">
         
-        {/* KPIs (S'adapte sur 1 colonne mobile, 2 tablettes, 3 desktop) */}
+        {/* KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <Card className="border-none shadow-sm bg-gradient-to-br from-[#0056A8] to-[#00A3E0] text-white rounded-2xl">
             <CardContent className="p-5 sm:p-6">
@@ -314,15 +358,16 @@ const AgentSupervisionModule: React.FC = () => {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           
           <div className="xl:col-span-2 space-y-6">
-            {/* CARTE LEAFLET RESPONSIVE (hauteur variable) */}
+            {/* CARTE LEAFLET RESPONSIVE */}
             <Card className="border-none shadow-sm rounded-2xl overflow-hidden relative">
               <div className="absolute top-4 left-4 z-[400]">
                 <Badge className="bg-white/90 text-slate-800 shadow-md backdrop-blur-md px-2 sm:px-3 py-1 font-bold flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm">
-                  <Signal className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-emerald-500 animate-pulse" /> Live Map
+                  <Signal className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-emerald-500 animate-pulse" /> Live Map {isGeneralSupervisor ? '(Globale)' : (supervisorStructure ? `(${supervisorStructure})` : '')}
                 </Badge>
               </div>
               <div className="h-[300px] md:h-[400px] w-full">
-                <MapContainer center={defaultCenter} zoom={12} scrollWheelZoom={true} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+                <MapContainer center={mapCenter} zoom={mapZoom} scrollWheelZoom={true} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+                  <ChangeView center={mapCenter} zoom={mapZoom} />
                   <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                   {liveFeed.map((feed) => {
                     if (!feed.latitude || !feed.longitude) return null;
@@ -348,7 +393,7 @@ const AgentSupervisionModule: React.FC = () => {
               </div>
             </Card>
 
-            {/* TABLEAU DES AGENTS (Avec overflow-x pour mobile) */}
+            {/* TABLEAU DES AGENTS */}
             <Card className="border-none shadow-sm rounded-2xl">
               <CardHeader className="border-b bg-slate-50/80 p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4">
@@ -366,41 +411,51 @@ const AgentSupervisionModule: React.FC = () => {
                   <table className="w-full text-sm text-left whitespace-nowrap">
                     <thead className="bg-white border-b text-slate-400 font-bold uppercase text-[10px] tracking-wider">
                       <tr>
-                        <th className="px-4 sm:px-6 py-4">Nom de l'agent</th>
+                        <th className="px-4 sm:px-6 py-4">Nom de l'agent {isGeneralSupervisor && "(Zone)"}</th>
                         <th className="px-4 sm:px-6 py-4 text-center">Recensés</th>
                         <th className="px-4 sm:px-6 py-4 text-center">À Risque</th>
                         <th className="px-4 sm:px-6 py-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {filteredAgents.map((agent) => (
-                        <tr key={agent.id} className="hover:bg-blue-50/50 transition-colors cursor-pointer group" onClick={() => openAgentHistory(agent)}>
-                          <td className="px-4 sm:px-6 py-4">
-                            <div className="font-bold text-slate-800 group-hover:text-[#0056A8] transition-colors">{agent.name}</div>
-                            <div className="text-[10px] sm:text-xs text-slate-500 flex items-center gap-1 mt-1">
-                              <span className={`h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full ${agent.lastActive && (new Date().getTime() - new Date(agent.lastActive).getTime() < 86400000) ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
-                              {timeAgo(agent.lastActive)}
-                            </div>
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-center">
-                            <span className="inline-flex items-center justify-center bg-slate-100 group-hover:bg-white text-slate-800 font-black text-sm h-8 w-10 sm:w-12 rounded-lg">
-                              {agent.totalScreenings}
-                            </span>
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-center">
-                            {agent.atRiskCount > 0 ? (
-                              <Badge className="bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-md text-[10px] sm:text-xs">
-                                {agent.atRiskCount} alertes
-                              </Badge>
-                            ) : <span className="text-slate-300">-</span>}
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-right">
-                            <Button variant="ghost" size="sm" className="text-[#0056A8] bg-blue-50 hover:bg-[#0056A8] hover:text-white px-2 sm:px-3">
-                              <span className="hidden sm:inline">Voir liste</span> <ChevronRight className="h-4 w-4 sm:ml-1" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredAgents.map((agent) => {
+                        const isRecentlyActive = agent.id === recentActionAgentId;
+                        return (
+                          <tr key={agent.id} className={`hover:bg-blue-50/50 transition-colors cursor-pointer group ${isRecentlyActive ? 'bg-emerald-50/30' : ''}`} onClick={() => openAgentHistory(agent)}>
+                            <td className="px-4 sm:px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <div className="font-bold text-slate-800 group-hover:text-[#0056A8] transition-colors">{agent.name}</div>
+                                {isRecentlyActive && (
+                                  <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-600 animate-in slide-in-from-bottom-2 fade-in duration-300">
+                                    +1
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] sm:text-xs text-slate-500 flex items-center gap-1 mt-1">
+                                <span className={`h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full ${agent.lastActive && (new Date().getTime() - new Date(agent.lastActive).getTime() < 86400000) ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                                {timeAgo(agent.lastActive)}
+                              </div>
+                            </td>
+                            <td className="px-4 sm:px-6 py-4 text-center">
+                              <span className={`inline-flex items-center justify-center bg-slate-100 group-hover:bg-white font-black text-sm h-8 w-10 sm:w-12 rounded-lg transition-colors ${isRecentlyActive ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' : 'text-slate-800'}`}>
+                                {agent.totalScreenings}
+                              </span>
+                            </td>
+                            <td className="px-4 sm:px-6 py-4 text-center">
+                              {agent.atRiskCount > 0 ? (
+                                <Badge className="bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded-md text-[10px] sm:text-xs">
+                                  {agent.atRiskCount} alertes
+                                </Badge>
+                              ) : <span className="text-slate-300">-</span>}
+                            </td>
+                            <td className="px-4 sm:px-6 py-4 text-right">
+                              <Button variant="ghost" size="sm" className="text-[#0056A8] bg-blue-50 hover:bg-[#0056A8] hover:text-white px-2 sm:px-3">
+                                <span className="hidden sm:inline">Voir liste</span> <ChevronRight className="h-4 w-4 sm:ml-1" />
+                              </Button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -408,7 +463,7 @@ const AgentSupervisionModule: React.FC = () => {
             </Card>
           </div>
 
-          {/* FLUX EN DIRECT : Hauteur fixe sur mobile, collant sur desktop */}
+          {/* FLUX EN DIRECT */}
           <div className="xl:col-span-1">
             <Card className="border-none shadow-sm rounded-2xl h-[400px] sm:h-[500px] xl:h-[calc(100vh-12rem)] flex flex-col xl:sticky xl:top-24">
               <CardHeader className="border-b bg-slate-50/80 p-4 shrink-0">

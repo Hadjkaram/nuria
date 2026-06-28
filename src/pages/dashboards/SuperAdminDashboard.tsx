@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/i18n/LanguageContext';
 import DashboardLayout from '@/components/DashboardLayout';
-import { Users, Building, Globe, Activity, Shield, Layers, Database, Monitor, Plus, Settings, Bell, Loader2 } from 'lucide-react';
+import { Users, Building, Globe, Activity, Shield, Layers, Database, Settings, Bell, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge'; // Import ajouté
+import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '@/lib/supabase';
@@ -33,35 +33,51 @@ const SuperAdminDashboard: React.FC = () => {
     const fetchGlobalData = async () => {
       setIsLoading(true);
       try {
-        // 1. Récupération des données globales depuis plusieurs tables
-        // Note: On ajoute les colonnes manquantes (first_name, role) dans le select
-        const [profilesRes, orgsRes, screeningsRes, settingsRes] = await Promise.all([
-          supabase.from('profiles').select('id, organization, created_at, status, first_name, role'),
-          supabase.from('structures').select('id, region'),
-          supabase.from('screenings').select('id, created_at'),
-          supabase.from('platform_settings').select('modules').eq('id', 'global').single()
-        ]);
+        const { data: profilesData, error: errProfiles } = await supabase.from('profiles').select('*');
+        if (errProfiles) console.warn("Attention: Problème lecture profiles", errProfiles.message);
+        const profiles = profilesData || [];
 
-        if (profilesRes.error) throw profilesRes.error;
+        const { data: orgsData, error: errOrgs } = await supabase.from('organizations').select('id');
+        if (errOrgs) console.warn("Attention: Problème lecture organizations", errOrgs.message);
+        const formalOrganizations = orgsData || [];
 
-        const profiles = profilesRes.data || [];
-        const structures = orgsRes.data || [];
-        const screenings = screeningsRes.data || [];
-        const modules = settingsRes.data?.modules || [];
+        const { data: screeningsData, error: errScreenings } = await supabase.from('screenings').select('id, created_at, child_name');
+        if (errScreenings) console.warn("Attention: Problème lecture screenings", errScreenings.message);
+        const screenings = screeningsData || [];
 
-        // 2. Calcul des KPIs
-        const orgSet = new Set(profiles.map(p => p.organization).filter(o => o !== '-'));
+        const aboboData = screenings.filter(s => s.created_at?.includes('2026-04-02'));
+        const yakroData = screenings.filter(s => s.created_at?.includes('2026-04-11'));
+        const wassakaraData = screenings.filter(s => s.created_at?.includes('2026-04-23'));
+
+        const officialCampaigns = [...aboboData, ...yakroData, ...wassakaraData];
+
+        const uniqueScreenings: any[] = [];
+        const seenNames = new Set();
+        officialCampaigns.forEach(item => {
+          const childName = (item.child_name || 'inconnu').trim().toLowerCase();
+          if (!seenNames.has(childName)) {
+            seenNames.add(childName);
+            uniqueScreenings.push(item);
+          }
+        });
+
+        const realActivityVolume = uniqueScreenings.length; 
+
+        const { data: settingsData, error: errSettings } = await supabase.from('platform_settings').select('modules').eq('id', 'global').maybeSingle();
+        if (errSettings) console.warn("Attention: Problème lecture platform_settings", errSettings.message);
+        const modules = settingsData?.modules || [];
+
+        const orgSet = new Set(profiles.map(p => p.assigned_structure || p.organization).filter(o => o && o !== '-'));
         
         setStats({
           totalUsers: profiles.length,
           activeCountries: 1, 
-          activeOrgs: structures.length || orgSet.size,
-          activityVolume: screenings.length,
+          activeOrgs: formalOrganizations.length > 0 ? formalOrganizations.length : orgSet.size,
+          activityVolume: realActivityVolume, 
           systemAlerts: profiles.filter(p => p.status === 'pending').length, 
           activeModules: Array.isArray(modules) ? modules.filter((m: any) => m.enabled).length : 8
         });
 
-        // 3. Activité Hebdomadaire
         const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
         const last7Days = [];
         for (let i = 6; i >= 0; i--) {
@@ -69,7 +85,7 @@ const SuperAdminDashboard: React.FC = () => {
           d.setDate(d.getDate() - i);
           const dayLabel = days[d.getDay()];
           const dayActions = screenings.filter(s => 
-            new Date(s.created_at).toDateString() === d.toDateString()
+            s.created_at && new Date(s.created_at).toDateString() === d.toDateString()
           ).length;
           
           last7Days.push({
@@ -80,24 +96,22 @@ const SuperAdminDashboard: React.FC = () => {
         }
         setActivityData(last7Days);
 
-        // 4. Statistiques Pays
         setCountryStats([
-          { country: '🇨🇮 Côte d\'Ivoire', users: profiles.length, orgs: structures.length || orgSet.size, status: 'Active' },
+          { country: '🇨🇮 Côte d\'Ivoire', users: profiles.length, orgs: formalOrganizations.length > 0 ? formalOrganizations.length : orgSet.size, status: 'Active' },
           { country: '🇸🇳 Sénégal', users: 0, orgs: 0, status: 'Pilote' }
         ]);
 
-        // 5. Logs récents (CORRIGÉ : Casté en any pour éviter les erreurs de propriétés)
         const logs = profiles.slice(0, 5).map((p: any) => ({
           action: `Nouvel utilisateur: ${p.first_name || 'Inconnu'}`,
           user: p.role || 'N/A',
-          time: new Date(p.created_at).toLocaleDateString(),
+          time: p.created_at ? new Date(p.created_at).toLocaleDateString() : 'Date inconnue',
           type: p.status === 'pending' ? 'warning' : 'success'
         }));
         setRecentLogs(logs);
 
       } catch (error: any) {
-        console.error(error);
-        toast({ title: "Erreur", description: "Impossible de charger la console d'administration.", variant: "destructive" });
+        console.error("Erreur critique Dashboard:", error);
+        toast({ title: "Erreur partielle", description: "Certaines données n'ont pas pu être chargées.", variant: "destructive" });
       } finally {
         setIsLoading(false);
       }
@@ -119,11 +133,11 @@ const SuperAdminDashboard: React.FC = () => {
 
   const quickActions = [
     { icon: Globe, label: t('sa.addCountry'), path: '/dashboard/countries', color: 'bg-rose-500' },
-    { icon: Building, label: t('sa.addOrg'), path: '/dashboard/structures', color: 'bg-blue-500' },
+    { icon: Building, label: t('sa.addOrg'), path: '/dashboard/organizations', color: 'bg-blue-500' },
     { icon: Shield, label: t('sa.createRole'), path: '/dashboard/roles', color: 'bg-emerald-500' },
     { icon: Settings, label: t('sa.managePermissions'), path: '/dashboard/roles', color: 'bg-violet-500' },
-    { icon: Database, label: t('sa.viewLogs'), path: '/dashboard/settings', color: 'bg-amber-500' },
-    { icon: Layers, label: t('sa.toggleModule'), path: '/dashboard/settings', color: 'bg-teal-500' },
+    { icon: Database, label: t('sa.viewLogs'), path: '/dashboard/logs', color: 'bg-amber-500' },
+    { icon: Layers, label: t('sa.toggleModule'), path: '/dashboard/modules', color: 'bg-teal-500' },
   ];
 
   return (
@@ -140,7 +154,6 @@ const SuperAdminDashboard: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* KPIs */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             {kpis.map((kpi, i) => (
               <div key={i} className="bg-card rounded-xl p-4 border border-border">
@@ -153,7 +166,6 @@ const SuperAdminDashboard: React.FC = () => {
             ))}
           </div>
 
-          {/* Quick Actions */}
           <div className="mb-6">
             <h2 className="text-lg font-semibold mb-3">{t('pd.quickActions')}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -169,7 +181,6 @@ const SuperAdminDashboard: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Platform Activity */}
             <div className="bg-card rounded-xl border border-border p-5">
               <h2 className="text-lg font-semibold mb-4">{t('sa.weeklyActivity')}</h2>
               <ResponsiveContainer width="100%" height={250}>
@@ -184,7 +195,6 @@ const SuperAdminDashboard: React.FC = () => {
               </ResponsiveContainer>
             </div>
 
-            {/* Country Stats */}
             <div className="bg-card rounded-xl border border-border p-5">
               <h2 className="text-lg font-semibold mb-4">{t('sa.countryStats')}</h2>
               <div className="space-y-2">
@@ -202,7 +212,6 @@ const SuperAdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Recent Logs */}
             <div className="bg-card rounded-xl border border-border p-5 lg:col-span-2">
               <h2 className="text-lg font-semibold mb-4">{t('sa.recentLogs')}</h2>
               <div className="space-y-2">

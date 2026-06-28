@@ -49,38 +49,41 @@ const LandingPage: React.FC = () => {
     a: t(`faq.a${i + 1}`),
   }));
 
+  // Liste des partenaires avec les images exactes de ton dossier public
+  const partners = [
+    { name: 'UNICEF', logo: '/UNICEF_Logo.png' },
+    { name: 'MSHMU', logo: '/MSHMU.png' },
+    { name: 'PNSM', logo: '/PNSM.jpeg' },
+    { name: 'Pass Mousso', logo: '/LOGO PSM.png' },
+    { name: 'ASBCOM', logo: '/ASBCOM.png' }
+  ];
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
       {/* ═══════════════════ HERO ═══════════════════ */}
       <section id="hero" className="relative min-h-screen flex items-center overflow-hidden" style={{ background: 'linear-gradient(165deg, hsl(205 78% 22%) 0%, hsl(205 78% 16%) 50%, hsl(205 78% 12%) 100%)' }}>
-        {/* Decorative circles */}
         <div className="absolute top-20 left-[-10%] w-[500px] h-[500px] rounded-full opacity-[0.04]" style={{ background: 'radial-gradient(circle, hsl(36 90% 55%), transparent 70%)' }} />
         <div className="absolute bottom-10 right-[-5%] w-[400px] h-[400px] rounded-full opacity-[0.05]" style={{ background: 'radial-gradient(circle, hsl(160 55% 42%), transparent 70%)' }} />
         
-        {/* Africa silhouette subtle watermark */}
         <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/[0.03] text-[400px] font-black leading-none select-none pointer-events-none hidden xl:block">🌍</div>
 
         <div className="container mx-auto px-4 pt-24 pb-32 relative z-10">
           <div className="max-w-5xl mx-auto text-center">
-            {/* Badge */}
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/15 rounded-full px-5 py-2.5 mb-10 animate-fade-in">
               <span className="w-2.5 h-2.5 rounded-full bg-[hsl(var(--accent))] animate-pulse" />
               <span className="text-white/90 text-sm font-medium tracking-wide">Plateforme africaine de neurodéveloppement</span>
             </div>
 
-            {/* Logo - DOUBLED */}
             <img src={nuriaLogo} alt="NURIA" className="h-32 md:h-48 lg:h-56 mx-auto mb-10 brightness-0 invert drop-shadow-2xl animate-fade-in" style={{ animationDelay: '0.1s' }} />
 
-            {/* Title with orange accent */}
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold leading-[1.1] mb-8 animate-fade-in" style={{ animationDelay: '0.15s' }}>
               <span className="text-white">Détection précoce,{'\n'}coordination des soins</span>
               <br />
               <span className="text-[hsl(var(--accent))]">et accompagnement des familles</span>
             </h1>
 
-            {/* Subtitles */}
             <p className="text-white/90 text-lg md:text-xl font-semibold mb-4 max-w-3xl mx-auto animate-fade-in" style={{ animationDelay: '0.2s' }}>
               La première plateforme africaine dédiée aux troubles du neurodéveloppement
             </p>
@@ -91,7 +94,6 @@ const LandingPage: React.FC = () => {
               Pensée pour l'Afrique. Déployée pour les systèmes de santé, les familles et les professionnels.
             </p>
 
-            {/* CTAs */}
             <div className="flex flex-wrap justify-center gap-4 animate-fade-in" style={{ animationDelay: '0.35s' }}>
               <Button 
                 size="xl" 
@@ -102,7 +104,6 @@ const LandingPage: React.FC = () => {
                 <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
               </Button>
               
-              {/* CORRECTION : Bouton bleu au lieu de contour blanc */}
               <Button 
                 size="xl"
                 className="bg-[#0056A8] hover:bg-[#004080] text-white shadow-xl text-base px-8 py-6 rounded-xl border-none transition-all"
@@ -111,7 +112,6 @@ const LandingPage: React.FC = () => {
                 Se connecter
               </Button>
               
-              {/* NOUVEAU BOUTON : PORTAIL AGENT DE TERRAIN */}
               <Button 
                 size="xl"
                 className="bg-white/15 hover:bg-white/25 text-white border border-white/20 text-base px-8 py-6 rounded-xl backdrop-blur-sm transition-all"
@@ -124,7 +124,6 @@ const LandingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Wave divider */}
         <div className="absolute bottom-0 left-0 right-0">
           <svg viewBox="0 0 1440 120" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full" preserveAspectRatio="none">
             <path d="M0 120L48 110C96 100 192 80 288 70C384 60 480 60 576 65C672 70 768 80 864 85C960 90 1056 90 1152 82C1248 74 1344 58 1392 50L1440 42V120H1392C1344 120 1248 120 1152 120C1056 120 960 120 864 120C768 120 672 120 576 120C480 120 384 120 288 120C192 120 96 120 48 120H0Z" fill="hsl(210, 20%, 98%)" />
@@ -268,12 +267,21 @@ const LandingPage: React.FC = () => {
       {/* ═══════════════════ PARTNERS ═══════════════════ */}
       <section className="py-20 bg-background">
         <div className="container mx-auto px-4">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-10">{t('partners.title')}</h2>
-          <div className="flex flex-wrap justify-center gap-6">
-            {['OMS', 'UNICEF', 'UNESCO', 'Union Africaine', 'Banque Mondiale'].map((p) => (
-              <div key={p} className="bg-muted rounded-xl px-10 py-5 font-semibold text-muted-foreground/60 text-lg border border-border">{p}</div>
+          <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">{t('partners.title') || 'Nos Partenaires'}</h2>
+          
+          {/* SECTION DES LOGOS (EN COULEURS, SANS GRISÉ) */}
+          <div className="flex flex-wrap justify-center items-center gap-8 md:gap-12">
+            {partners.map((p) => (
+              <div key={p.name} className="bg-white rounded-2xl p-6 shadow-sm border border-border hover:shadow-md hover:border-primary/20 transition-all flex items-center justify-center w-48 h-36 md:w-56 md:h-40">
+                <img 
+                  src={p.logo} 
+                  alt={`Logo ${p.name}`} 
+                  className="max-w-full max-h-full object-contain" 
+                />
+              </div>
             ))}
           </div>
+
         </div>
       </section>
 

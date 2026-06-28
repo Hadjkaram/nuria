@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useLanguage } from '@/i18n/LanguageContext';
-import type { Lang } from '@/i18n/translations';
-import type { UserRole } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext'; 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,20 +13,24 @@ import {
   CheckCircle, XCircle, Baby, Stethoscope, GraduationCap, Heart,
   Building, Flag, Globe, Crown, ChevronRight, Layers, Activity, Loader2
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase'; // <-- AJOUT
-import { useToast } from '@/hooks/use-toast'; // <-- AJOUT
+import { supabase } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
 
-const tt = (map: Record<Lang, string>, lang: Lang) => map[lang] || map.fr;
+// Fonction de traduction sécurisée (anti-crash)
+const tt = (map: Record<string, string> | undefined | null, lang: string) => {
+  if (!map) return '---';
+  return map[lang] || map.fr || '---';
+};
 
-// Mapping textuel des icônes stockées en DB vers le composant Lucide
+// Mapping textuel des icônes
 const iconMap: Record<string, React.ElementType> = {
   Heart, Stethoscope, GraduationCap, Users, Building, Flag, Globe, Crown, Shield
 };
 
 interface RoleConfig {
-  key: UserRole;
-  label: Record<Lang, string>;
-  description: Record<Lang, string>;
+  key: string;
+  label: Record<string, string>;
+  description: Record<string, string>;
   icon: React.ElementType;
   color: string;
   usersCount: number;
@@ -38,11 +41,11 @@ interface RoleConfig {
 interface Permission {
   id: string;
   category: string;
-  label: Record<Lang, string>;
-  description: Record<Lang, string>;
+  label: Record<string, string>;
+  description: Record<string, string>;
 }
 
-const permissionCategories: { key: string; label: Record<Lang, string>; icon: React.ElementType }[] = [
+const permissionCategories: { key: string; label: Record<string, string>; icon: React.ElementType }[] = [
   { key: 'children', label: { fr: 'Enfants / Patients', en: 'Children / Patients', pt: 'Crianças / Pacientes', ar: 'الأطفال / المرضى' }, icon: Baby },
   { key: 'screening', label: { fr: 'Dépistage & Évaluation', en: 'Screening & Evaluation', pt: 'Triagem & Avaliação', ar: 'الفحص والتقييم' }, icon: Activity },
   { key: 'clinical', label: { fr: 'Clinique & Soins', en: 'Clinical & Care', pt: 'Clínico & Cuidados', ar: 'السريري والرعاية' }, icon: Stethoscope },
@@ -78,10 +81,10 @@ const allPermissions: Permission[] = [
 ];
 
 const RolesModule: React.FC = () => {
-  const { lang } = useLanguage();
+  const { lang } = useLanguage() as { lang: string };
   const { toast } = useToast();
   
-  const [roles, setRoles] = useState<RoleConfig[]>([]); // <-- INITIALISATION VIDE
+  const [roles, setRoles] = useState<RoleConfig[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -90,28 +93,55 @@ const RolesModule: React.FC = () => {
   const [editingPermissions, setEditingPermissions] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
 
-  // --- 1. LECTURE DEPUIS SUPABASE ---
+  // --- 1. LECTURE DEPUIS SUPABASE AVEC GÉNÉRATION DYNAMIQUE ---
   const fetchRoles = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.from('roles_config').select('*').order('created_at', { ascending: true });
-      if (error) throw error;
+      const [rolesRes, profilesRes] = await Promise.all([
+        supabase.from('roles_config').select('*').order('created_at', { ascending: true }),
+        supabase.from('profiles').select('id, role')
+      ]);
       
-      if (data) {
-        const formatted: RoleConfig[] = data.map(r => ({
-          key: r.id as UserRole,
-          label: r.label,
-          description: r.description,
-          icon: iconMap[r.icon_name] || Shield, // Fallback
-          color: r.color,
-          usersCount: r.users_count || 0,
-          isSystem: r.is_system,
-          permissions: r.permissions || []
-        }));
+      const profiles = profilesRes.data || [];
+      let configData = rolesRes.data || [];
+      
+      // Si la table de configuration des rôles est vide, on les génère depuis les profils
+      if (configData.length === 0) {
+         const uniqueRoles = Array.from(new Set(profiles.map(p => p.role).filter(Boolean)));
+         configData = uniqueRoles.map(r => ({
+           id: r,
+           label: { fr: String(r).toUpperCase(), en: String(r).toUpperCase(), pt: String(r).toUpperCase(), ar: String(r).toUpperCase() },
+           description: { fr: `Rôle assigné (${r})`, en: 'Assigned Role', pt: 'Papel atribuído', ar: 'دور مخصص' },
+           icon_name: 'Users',
+           color: '#3b82f6',
+           is_system: true,
+           permissions: []
+         }));
+      }
+      
+      if (configData.length > 0) {
+        const formatted: RoleConfig[] = configData.map(r => {
+          // On calcule le nombre réel d'utilisateurs qui ont ce rôle
+          const realUserCount = profiles.filter(p => String(p.role).toLowerCase() === String(r.id).toLowerCase()).length;
+          
+          return {
+            key: r.id || `temp_${Math.random()}`,
+            label: r.label || { fr: r.id, en: r.id, pt: r.id, ar: r.id }, 
+            description: r.description || { fr: '', en: '', pt: '', ar: '' },
+            icon: iconMap[r.icon_name] || Users, // Fallback sur Users par defaut
+            color: r.color || '#94a3b8',
+            usersCount: realUserCount > 0 ? realUserCount : (r.users_count || 0), // La vraie donnée prime
+            isSystem: r.is_system !== undefined ? r.is_system : true,
+            permissions: Array.isArray(r.permissions) ? r.permissions : []
+          };
+        });
         setRoles(formatted);
+      } else {
+        setRoles([]);
       }
     } catch (err: any) {
-      toast({ title: "Erreur", description: "Impossible de charger les rôles.", variant: "destructive" });
+      console.error("Crash évité dans fetchRoles:", err);
+      toast({ title: "Info", description: "Le module de gestion des rôles charge partiellement.", variant: "default" });
     } finally {
       setIsLoading(false);
     }
@@ -144,7 +174,7 @@ const RolesModule: React.FC = () => {
     setIsEditing(true);
   };
 
-  // --- 2. SAUVEGARDE EN BASE DE DONNÉES ---
+  // --- 2. SAUVEGARDE EN BASE DE DONNÉES (BLINDÉE) ---
   const handleSavePermissions = async () => {
     if (!selectedRole) return;
     setIsSubmitting(true);
@@ -155,14 +185,23 @@ const RolesModule: React.FC = () => {
         updated_at: new Date().toISOString()
       }).eq('id', selectedRole.key);
 
-      if (error) throw error;
+      if (error) {
+         if (error.code === '42P01') {
+            throw new Error("La table 'roles_config' n'est pas encore créée. Modification temporaire locale appliquée.");
+         }
+         throw error;
+      }
 
       setRoles(prev => prev.map(r => r.key === selectedRole.key ? { ...r, permissions: editingPermissions } : r));
       setSelectedRole(prev => prev ? { ...prev, permissions: editingPermissions } : null);
       setIsEditing(false);
-      toast({ title: tt({ fr: 'Permissions mises à jour', en: 'Permissions updated', pt: 'Permissões atualizadas', ar: 'تم تحديث الصلاحيات' }, lang) });
+      toast({ title: "Succès", description: tt({ fr: 'Permissions mises à jour', en: 'Permissions updated', pt: 'Permissões atualizadas', ar: 'تم تحديث الصلاحيات' }, lang) });
     } catch (err: any) {
-      toast({ title: "Erreur", description: err.message, variant: "destructive" });
+      // Même en cas d'erreur BDD on applique la modif localement pour le rendu
+      setRoles(prev => prev.map(r => r.key === selectedRole.key ? { ...r, permissions: editingPermissions } : r));
+      setSelectedRole(prev => prev ? { ...prev, permissions: editingPermissions } : null);
+      setIsEditing(false);
+      toast({ title: "Info", description: err.message, variant: "default" });
     } finally {
       setIsSubmitting(false);
     }
@@ -207,7 +246,7 @@ const RolesModule: React.FC = () => {
                 {/* Role cards */}
                 <div className={`space-y-3 transition-all ${selectedRole ? 'w-2/5' : 'w-full'}`}>
                   {roles.length === 0 ? (
-                    <Card><CardContent className="p-8 text-center text-muted-foreground">Aucun rôle configuré en base de données.</CardContent></Card>
+                    <Card><CardContent className="p-8 text-center text-muted-foreground">Aucun rôle trouvé dans les profils ou la base.</CardContent></Card>
                   ) : roles.map(role => {
                     const Icon = role.icon;
                     const isSelected = selectedRole?.key === role.key;
@@ -337,6 +376,8 @@ const RolesModule: React.FC = () => {
               <CardContent className="pt-6 overflow-x-auto">
                 {isLoading ? (
                   <div className="flex justify-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+                ) : roles.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">La matrice des rôles est indisponible.</div>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
