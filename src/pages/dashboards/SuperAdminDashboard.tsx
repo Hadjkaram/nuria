@@ -48,8 +48,9 @@ const SuperAdminDashboard: React.FC = () => {
         const aboboData = screenings.filter(s => s.created_at?.includes('2026-04-02'));
         const yakroData = screenings.filter(s => s.created_at?.includes('2026-04-11'));
         const wassakaraData = screenings.filter(s => s.created_at?.includes('2026-04-23'));
+        const adiakeData = screenings.filter(s => s.created_at?.includes('2026-06-08') || s.created_at?.includes('2026-06-09'));
 
-        const officialCampaigns = [...aboboData, ...yakroData, ...wassakaraData];
+        const officialCampaigns = [...aboboData, ...yakroData, ...wassakaraData, ...adiakeData];
 
         const uniqueScreenings: any[] = [];
         const seenNames = new Set();
@@ -72,7 +73,7 @@ const SuperAdminDashboard: React.FC = () => {
         setStats({
           totalUsers: profiles.length,
           activeCountries: 1, 
-          activeOrgs: formalOrganizations.length > 0 ? formalOrganizations.length : orgSet.size,
+          activeOrgs: 4, 
           activityVolume: realActivityVolume, 
           systemAlerts: profiles.filter(p => p.status === 'pending').length, 
           activeModules: Array.isArray(modules) ? modules.filter((m: any) => m.enabled).length : 8
@@ -97,7 +98,7 @@ const SuperAdminDashboard: React.FC = () => {
         setActivityData(last7Days);
 
         setCountryStats([
-          { country: '🇨🇮 Côte d\'Ivoire', users: profiles.length, orgs: formalOrganizations.length > 0 ? formalOrganizations.length : orgSet.size, status: 'Active' },
+          { country: '🇨🇮 Côte d\'Ivoire', users: profiles.length, orgs: 4, status: 'Active' },
           { country: '🇸🇳 Sénégal', users: 0, orgs: 0, status: 'Pilote' }
         ]);
 
