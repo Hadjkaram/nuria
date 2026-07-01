@@ -175,7 +175,7 @@ const LoginPage: React.FC = () => {
             <p className="text-center text-sm text-muted-foreground">
               Pas encore de compte ?{' '}
               <Link to="/signup" className="text-primary hover:underline font-medium">
-                Contactez votre administrateur
+                Inscrivez-vous
               </Link>
             </p>
           </form>
