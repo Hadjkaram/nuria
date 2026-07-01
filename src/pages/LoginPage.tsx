@@ -179,15 +179,6 @@ const LoginPage: React.FC = () => {
               </Link>
             </p>
           </form>
-
-          {/* Demo accounts */}
-          <div className="mt-10 border-t border-border pt-6">
-            <p className="text-xs text-muted-foreground text-center mb-3">Comptes démo</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span>parent.koffi@email.com</span><span>medecin@nuria.app</span>
-              <span>agent@nuria.app</span><span>admin@nuria.app</span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

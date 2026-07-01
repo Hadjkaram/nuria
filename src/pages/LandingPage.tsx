@@ -111,15 +111,6 @@ const LandingPage: React.FC = () => {
               >
                 Se connecter
               </Button>
-              
-              <Button 
-                size="xl"
-                className="bg-white/15 hover:bg-white/25 text-white border border-white/20 text-base px-8 py-6 rounded-xl backdrop-blur-sm transition-all"
-                onClick={() => navigate('/recensement')}
-              >
-                <ClipboardList className="mr-2 h-5 w-5" />
-                Portail Agent de Terrain
-              </Button>
             </div>
           </div>
         </div>
