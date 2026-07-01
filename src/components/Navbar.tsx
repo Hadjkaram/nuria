@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Menu, X, Globe, ClipboardList } from 'lucide-react';
+import { Menu, X, Globe } from 'lucide-react';
 import type { Lang } from '@/i18n/translations';
 import nuriaLogo from '@/assets/nuria-logo.png';
 
@@ -67,17 +67,6 @@ const Navbar: React.FC = () => {
             )}
           </div>
 
-          {/* BOUTON : ESPACE AGENT (Desktop) */}
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="text-[hsl(var(--accent))] hover:text-white hover:bg-[hsl(var(--accent))]/20 mr-2" 
-            onClick={() => navigate('/login-agent')}
-          >
-            <ClipboardList className="h-4 w-4 mr-2" />
-            Espace Agent
-          </Button>
-
           {isAuthenticated ? (
             <>
               {/* CORRECTION : Fond blanc avec texte bleu pour Tableau de Bord */}
@@ -116,16 +105,7 @@ const Navbar: React.FC = () => {
           ))}
           
           <div className="flex gap-2 mt-3 pb-3 border-b border-white/10">
-            {/* BOUTON : ESPACE AGENT (Mobile) */}
-            <Button 
-              variant="secondary" 
-              size="sm" 
-              className="w-full bg-[hsl(var(--accent))]/10 text-[hsl(var(--accent))] hover:bg-[hsl(var(--accent))]/20 border border-[hsl(var(--accent))]/30" 
-              onClick={() => { navigate('/login-agent'); setMobileOpen(false); }}
-            >
-              <ClipboardList className="h-4 w-4 mr-2" />
-              Accès Agent de Terrain
-            </Button>
+            {/* Espace réservé supprimé */}
           </div>
 
           <div className="flex gap-2 mt-3">
