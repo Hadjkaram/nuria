@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLanguage } from '@/i18n/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn, ArrowLeft } from 'lucide-react';
 import nuriaLogo from '@/assets/nuria-logo.png';
 import { supabase } from '@/lib/supabase';
 
@@ -115,8 +115,17 @@ const LoginPage: React.FC = () => {
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="lg:w-[45%] w-full bg-muted flex items-center justify-center px-6 py-12 lg:py-0">
+      <div className="lg:w-[45%] w-full bg-muted flex items-center justify-center px-6 py-12 lg:py-0 relative">
         <div className="w-full max-w-md">
+          {/* Bouton de retour */}
+          <button
+            onClick={() => navigate('/')}
+            className="absolute top-4 left-4 lg:top-8 lg:left-8 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm font-medium"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Retour
+          </button>
+
           <h1 className="text-2xl lg:text-3xl font-bold font-heading text-foreground mb-1">
             Connexion à NURIA
           </h1>
